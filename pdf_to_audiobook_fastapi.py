@@ -1,171 +1,102 @@
-"""
-Simple Text → Audiobook FastAPI app (supports PDF upload or pasted text)
-Features:
-- Upload a PDF (will accept up to 5 pages by default)
-- Paste text directly
-- Uses pyttsx3 (offline) to synthesize to WAV file
-- Measures and returns generation time and estimated audio duration
-
-Notes / Dependencies:
-- Python 3.8+
-- pip install fastapi uvicorn pypdf2 pyttsx3 python-multipart pydub
-- pydub + ffmpeg only needed if you want MP3 output. Install ffmpeg separately.
-  On Ubuntu: sudo apt install ffmpeg
-
-Run:
-  uvicorn pdf_to_audiobook_fastapi:app --reload --port 8000
-
-Endpoints:
-- POST /upload-pdf  -> form field 'file' (multipart). Returns JSON with path to generated audio and timing.
-- POST /paste-text  -> JSON {"text": "..."}. Returns JSON with path to generated audio and timing.
-
-This is intentionally minimal and synchronous (simple for demo / testing). Adjust for production.
-"""
-
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import FileResponse
-from pypdf import PdfReader
-import pyttsx3
-import time
+from fastapi import FastAPI, UploadFile, Form
+from fastapi.responses import JSONResponse, FileResponse
+from transformers import pipeline
+import spacy
+import tempfile
 import os
-import uuid
-import math
-from pydantic import BaseModel
-from io import BytesIO
+import re
+from collections import Counter
 
-app = FastAPI(title="Text → Audiobook Demo")
+app = FastAPI()
 
-OUTPUT_DIR = "outputs"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Load NLP tools
+nlp = spacy.load("en_core_web_sm")
+zero_shot = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 
-# Configuration
-MAX_PDF_PAGES = 10               
-WORDS_PER_PAGE_ESTIMATE = 500   
-SPEECH_WPM = 150                
+# Helper function to clean text
+def clean_text(text):
+    text = re.sub(r"\s+", " ", text.strip())  # remove line breaks
+    text = re.sub(r"[^A-Za-z0-9.,!?\"' ]+", "", text)  # remove symbols
+    return text
 
-class PasteTextRequest(BaseModel):
-    text: str
+# Intelligent ML-based character detection
+def intelligent_character_extraction(text):
+    doc = nlp(text)
+    candidates = set()
 
+    # Extract named entities (persons or orgs) + subjects
+    for ent in doc.ents:
+        if ent.label_ in ["PERSON", "ORG"]:
+            candidates.add(ent.text)
+    for tok in doc:
+        if tok.dep_ == "nsubj" and tok.pos_ in {"PROPN", "NOUN"}:
+            candidates.add(tok.text)
 
-def extract_text_from_pdf_bytes(data: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
-    reader = PdfReader(BytesIO(data))
-    num_pages = len(reader.pages)
-    if num_pages == 0:
-        return ""
-    pages_to_use = min(num_pages, max_pages)
-    texts = []
-    for i in range(pages_to_use):
-        page = reader.pages[i]
+    # Clean candidates
+    candidates = {c.strip() for c in candidates if len(c.strip()) > 1}
+
+    # Remove generic or common filler words
+    common_words = {
+        "Yes", "No", "Ok", "Hey", "Hello", "Hi", "Do", "So", "Go", "Please",
+        "He", "She", "They", "We", "It", "Man", "Woman", "Boy", "Girl", "Someone"
+    }
+    candidates = {c for c in candidates if c not in common_words}
+
+    # Classify each candidate using zero-shot classification
+    characters = []
+    for cand in candidates:
         try:
-            page_text = page.extract_text() or ""
+            res = zero_shot(cand, ["character", "object", "place", "abstract"])
+            if res["labels"][0] == "character" and res["scores"][0] > 0.6:
+                characters.append(cand)
         except Exception:
-            page_text = ""
-        texts.append(page_text)
-    return "\n\n".join(texts)
+            continue
 
+    # If dialogue exists, assume a narrator is present
+    if '"' in text and "Narrator" not in characters:
+        characters.append("Narrator")
 
-def estimate_audio_duration_seconds(text: str, wpm: int = SPEECH_WPM) -> float:
-    words = len(text.split())
-    minutes = words / wpm
-    return minutes * 60.0
+    # Deduplicate and sort
+    return sorted(set(characters))
 
+# Endpoint: Paste text
+@app.post("/paste-text/")
+async def paste_text_endpoint(text: str = Form(...)):
+    try:
+        cleaned = clean_text(text)
+        characters = intelligent_character_extraction(cleaned)
+        return JSONResponse({"characters_detected": characters, "text_length": len(cleaned)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-def synthesize_to_wav(text: str, filename_wav: str, rate: int = 180) -> None:
-    """Use pyttsx3 to synchronously write WAV file. Blocking call."""
-    engine = pyttsx3.init()
-    
-    engine.setProperty('rate', rate)  # words per minute (affects voice speed)
-  
-    engine.save_to_file(text, filename_wav)
-    engine.runAndWait()
-    engine.stop()
+# Endpoint: File upload
+@app.post("/upload-pdf/")
+async def upload_pdf(file: UploadFile):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
 
+        # Normally you'd extract text here (using PyPDF2 or pdfminer)
+        extracted_text = "PDF parsing not implemented in this example."
 
-@app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
-    contents = await file.read()
-    text = extract_text_from_pdf_bytes(contents)
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="No extractable text found in the PDF")
+        characters = intelligent_character_extraction(extracted_text)
+        return JSONResponse({"characters_detected": characters})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
-    
-    reader = PdfReader(BytesIO(contents))
-    actual_pages = len(reader.pages)
-    pages_used = min(actual_pages, MAX_PDF_PAGES)
+# Endpoint: Download file
+@app.get("/download/")
+async def download_file():
+    sample_path = "output_audio.mp3"
+    if not os.path.exists(sample_path):
+        with open(sample_path, "w") as f:
+            f.write("This is a placeholder file.")
+    return FileResponse(sample_path, filename="output_audio.mp3")
 
-    
-    truncated = actual_pages > MAX_PDF_PAGES
-
-    # Time the synthesis
-    file_id = str(uuid.uuid4())
-    wav_path = os.path.join(OUTPUT_DIR, f"audiobook_{file_id}.wav")
-    start = time.perf_counter()
-    synthesize_to_wav(text, wav_path)
-    end = time.perf_counter()
-
-    gen_time = end - start
-    est_duration = estimate_audio_duration_seconds(text)
-
-    return {
-        "status": "ok",
-        "original_pdf_pages": actual_pages,
-        "pages_used": pages_used,
-        "truncated": truncated,
-        "words": len(text.split()),
-        "estimated_audio_duration_seconds": round(est_duration, 2),
-        "generation_time_seconds": round(gen_time, 2),
-        "audio_file": wav_path
-    }
-
-
-@app.post("/paste-text")
-async def paste_text(payload: PasteTextRequest):
-    text = payload.text or ""
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Empty text provided")
-
-    
-    words = len(text.split())
-    max_words = MAX_PDF_PAGES * WORDS_PER_PAGE_ESTIMATE
-    if words > max_words:
-        
-        allowed_words = max_words
-        split_words = text.split()
-        text = " ".join(split_words[:allowed_words])
-        truncated = True
-    else:
-        truncated = False
-
-    file_id = str(uuid.uuid4())
-    wav_path = os.path.join(OUTPUT_DIR, f"audiobook_{file_id}.wav")
-
-    start = time.perf_counter()
-    synthesize_to_wav(text, wav_path)
-    end = time.perf_counter()
-
-    gen_time = end - start
-    est_duration = estimate_audio_duration_seconds(text)
-
-    return {
-        "status": "ok",
-        "words": len(text.split()),
-        "truncated": truncated,
-        "estimated_audio_duration_seconds": round(est_duration, 2),
-        "generation_time_seconds": round(gen_time, 2),
-        "audio_file": wav_path
-    }
-
-
-@app.get("/download/{filename}")
-def download_file(filename: str):
-    local_path = os.path.join(OUTPUT_DIR, filename)
-    if not os.path.exists(local_path):
-        raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(local_path, media_type='audio/wav', filename=filename)
-
-
-if __name__ == '__main__':
-    import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+@app.get("/")
+def home():
+    return {"message": "AI Audiobook Generator API is running 🚀"}
