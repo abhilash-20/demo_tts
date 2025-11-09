@@ -1,22 +1,53 @@
-# Python
-__pycache__/
+# ======================================
+# Python & FastAPI project ignores
+# ======================================
+
+# Byte-compiled / optimized / DLL files
+_pycache_/
 *.py[cod]
-*.egg-info/
-dist/
-build/
+*$py.class
 
-# Virtual environment
+# Virtual environments
 venv/
+.env/
 env/
-ENV/
+.venv/
 
-# Audio outputs and large files
-outputs/
-*.wav
+# Model directory (we’re not pushing this)
+model/
+wikiann-distilbert-ner.zip
+*.bin
+*.pt
+*.ckpt
+*.h5
+*.tar.gz
+
+# Hugging Face caches
+.cache/
+transformers_cache/
+datasets/
+tokenizers_cache/
+*.lock
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# Output / generated files
+output/
 *.mp3
+*.wav
+*.json
+*.csv
+*.pdf
 
-# Editor files
+# VSCode / IDE
 .vscode/
 .idea/
-*.sublime-workspace
-.DS_Store
+
+# Jupyter / Colab checkpoints
+.ipynb_checkpoints/

@@ -1,88 +1,188 @@
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.responses import JSONResponse, FileResponse
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 from gtts import gTTS
-import spacy
+from PyPDF2 import PdfReader
 import tempfile
 import os
 import re
 import time
-from PyPDF2 import PdfReader  # optional, used for text extraction
+import torch
+import spacy
+from transformers import pipeline as hf_pipeline
 
 app = FastAPI()
 
-# Load NLP tools
-nlp = spacy.load("en_core_web_sm")
-zero_shot = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+# =====================================================
+# 🔹 Load your fine-tuned DistilBERT NER model
+# =====================================================
+MODEL_DIR = "model"  # folder containing your unzipped wikiann-distilbert-ner
+tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+model = AutoModelForTokenClassification.from_pretrained(MODEL_DIR)
 
-# Helper function to clean text
-def clean_text(text):
-    text = re.sub(r"\s+", " ", text.strip())  # remove line breaks
-    text = re.sub(r"[^A-Za-z0-9.,!?\"' ]+", "", text)  # remove symbols
+device = 0 if torch.cuda.is_available() else -1
+ner_pipeline = pipeline("ner", model=model, tokenizer=tokenizer,
+                        aggregation_strategy="simple", device=device)
+
+# =====================================================
+# 🔹 Load additional NER tools for ensemble
+# =====================================================
+print("🔹 Loading spaCy and Hugging Face models for ensemble...")
+spacy_nlp = spacy.load("en_core_web_trf")
+
+hf_ner = hf_pipeline("ner",
+                     model="dslim/bert-base-NER",
+                     aggregation_strategy="simple",
+                     device=device)
+
+print("✅ All models loaded successfully.")
+
+# =====================================================
+# 🔹 Helper: Clean input text
+# =====================================================
+def clean_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", text.strip())  # remove line breaks, extra spaces
+    text = re.sub(r"[^A-Za-z0-9.,!?\"' ]+", "", text)  # remove unwanted symbols
     return text
 
 
-# Intelligent ML-based character detection
-def intelligent_character_extraction(text):
-    doc = nlp(text)
-    candidates = set()
+# =====================================================
+# 🔹 Individual extractors
+# =====================================================
+def extract_characters_trained(text: str):
+    """Extract characters using your fine-tuned DistilBERT model."""
+    results = ner_pipeline(text)
+    names = {ent["word"].replace("##", "").strip()
+             for ent in results
+             if ent["entity_group"].upper() in ("PER", "PERSON")}
+    if '"' in text and "Narrator" not in names:
+        names.add("Narrator")
+    return names
 
-    speech_verbs = {"said", "asked", "replied", "told", "whispered", "laughed", "smiled", "cried", "shouted", "thought"}
 
-    # Extract PERSON entities
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            candidates.add(ent.text.strip())
+def extract_characters_spacy(text: str):
+    """Extract characters using spaCy Transformer NER."""
+    doc = spacy_nlp(text)
+    names = {ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON"}
+    if '"' in text and "Narrator" not in names:
+        names.add("Narrator")
+    return names
 
-    # Extract probable speaker names near speech verbs
-    for sent in doc.sents:
-        if any(tok.lemma_.lower() in speech_verbs for tok in sent):
-            for tok in sent:
-                if tok.ent_type_ == "PERSON" or tok.pos_ == "PROPN":
-                    candidates.add(tok.text.strip())
 
-    # Remove generic or noisy terms
-    bad_words = {"He", "She", "They", "We", "It", "Someone", "Anyone", "Man", "Woman", "Boy", "Girl"}
-    candidates = {c for c in candidates if c not in bad_words and len(c) > 1}
+def extract_characters_hf(text: str):
+    """Extract characters using Hugging Face pretrained NER."""
+    results = hf_ner(text)
+    names = {ent["word"].strip()
+             for ent in results
+             if ent.get("entity_group", "").upper() in ("PER", "PERSON")}
+    if '"' in text and "Narrator" not in names:
+        names.add("Narrator")
+    return names
 
-    # Merge sub-parts of names (e.g., "Aarav" + "Aarav Mehta")
-    merged = set()
-    for cand in sorted(candidates, key=len, reverse=True):
-        if not any(cand in m for m in merged):
-            merged.add(cand)
 
-    # Run zero-shot classification
-    characters = []
-    for cand in merged:
-        try:
-            phrase = f"{cand} is a person or character in a story."
-            res = zero_shot(phrase, ["character", "object", "place", "abstract"])
-            if res["labels"][0] == "character" and res["scores"][0] > 0.6:
-                characters.append(cand)
-        except Exception:
+# =====================================================
+# 🔹 Ensemble extractor (union of all three)
+# =====================================================
+def ensemble_characters(text: str):
+    """Combine results from trained model, spaCy, and Hugging Face NER."""
+    a = extract_characters_trained(text)
+    b = extract_characters_spacy(text)
+    c = extract_characters_hf(text)
+
+    combined = a.union(b).union(c)
+    combined = {x for x in combined if len(x) > 2}
+
+    # Merge substrings to remove duplicates (e.g., "Me" inside "Meera")
+    final = []
+    for cand in sorted(combined, key=len, reverse=True):
+        if not any(cand in other for other in final):
+            final.append(cand)
+
+    # ✅ Enhanced Narrator Detection
+    lower_text = text.lower()
+    dialogue_quotes = text.count('"') + text.count("'")
+    long_paragraphs = sum(1 for para in text.split("\n") if len(para) > 100)
+    narrative_clues = any(
+        phrase in lower_text
+        for phrase in ["narrator", "she thought", "he thought", "reflected", "recalled"]
+    )
+
+    # Add narrator if story is narrative-heavy
+    if (
+        ("narrator" in lower_text)
+        or (narrative_clues)
+        or (dialogue_quotes < 6 and long_paragraphs > 2)
+    ):
+        if "Narrator" not in final:
+            final.append("Narrator")
+
+    # Post-process cleanup
+    return clean_character_list(final)
+
+def clean_character_list(characters):
+    """Post-process raw detected entities into clean unique character names."""
+    cleaned = set()
+    for name in characters:
+        name = name.strip()
+
+        # Skip empty or too short
+        if len(name) < 3:
             continue
 
-    # Add Narrator if dialogues exist
-    if '"' in text and "Narrator" not in characters:
-        characters.append("Narrator")
+        # Remove weird subword artifacts
+        name = re.sub(r"##", "", name)
+        name = re.sub(r"\s+", " ", name).strip()
 
-    return sorted(set(characters))
+        # Fix spacing around apostrophes (e.g., D ' Souza -> D'Souza)
+        name = re.sub(r"\s*'\s*", "'", name)
 
+        # Fix spacing after periods (e.g., . D -> D)
+        name = re.sub(r"(^|\s)\.\s*", " ", name).strip()
 
-# ✅ Paste text endpoint — detects characters + generates audiobook
+        # Capitalize correctly while preserving apostrophes (e.g., D'Souza)
+        name_parts = []
+        for part in name.split():
+            if "'" in part:
+                sub = part.split("'")
+                sub = [s.capitalize() for s in sub if s]
+                name_parts.append("'".join(sub))
+            else:
+                name_parts.append(part.capitalize())
+        name = " ".join(name_parts)
+
+        # Remove if likely a title or not a person
+        if re.match(r"^The\s+[A-Z]", name):  # e.g., "The Shadow Weaver"
+            continue
+        if any(w.lower() in {"pleaded", "said", "asked", "told", "replied"} for w in name.split()):
+            continue
+
+        # Remove obvious plurals
+        name = re.sub(r"s$", "", name)
+
+        cleaned.add(name)
+
+    # Merge duplicates (case-insensitive)
+    final = []
+    for cand in sorted(cleaned, key=len, reverse=True):
+        if not any(cand.lower() == other.lower() or cand.lower() in other.lower() for other in final):
+            final.append(cand)
+
+    return final
+# =====================================================
+# 🔹 /paste-text/ — Detect characters + generate audio
+# =====================================================
 @app.post("/paste-text/")
 async def paste_text_endpoint(text: str = Form(...)):
     try:
         start_time = time.time()
 
         cleaned = clean_text(text)
-        characters = intelligent_character_extraction(cleaned)
+        characters = ensemble_characters(cleaned)
 
-        # Ensure output directory exists
+        # Generate audiobook
         output_dir = os.path.join(os.getcwd(), "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        # Generate audiobook file
         audio_filename = f"audiobook_{int(time.time())}.mp3"
         audio_path = os.path.join(output_dir, audio_filename)
 
@@ -96,19 +196,22 @@ async def paste_text_endpoint(text: str = Form(...)):
             "text_length": len(cleaned),
             "audiobook_file": audio_path,
             "generation_time_seconds": gen_time,
-            "message": f"Audiobook saved successfully at {audio_path} 🎧"
+            "message": "Audiobook generated successfully 🎧"
         })
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-# ✅ Upload PDF endpoint — same behavior
+# =====================================================
+# 🔹 /upload-pdf/ — Process PDF & generate audiobook
+# =====================================================
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile):
     try:
         start_time = time.time()
 
+        # Save uploaded PDF temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
@@ -121,13 +224,12 @@ async def upload_pdf(file: UploadFile):
                 extracted_text += page.extract_text() or ""
 
         cleaned = clean_text(extracted_text)
-        characters = intelligent_character_extraction(cleaned)
+        characters = ensemble_characters(cleaned)
 
-        # Ensure output directory exists
+        # Generate audiobook
         output_dir = os.path.join(os.getcwd(), "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        # Generate audiobook
         audio_filename = f"pdf_audiobook_{int(time.time())}.mp3"
         audio_path = os.path.join(output_dir, audio_filename)
 
@@ -141,28 +243,36 @@ async def upload_pdf(file: UploadFile):
             "text_length": len(cleaned),
             "audiobook_file": audio_path,
             "generation_time_seconds": gen_time,
-            "message": f"PDF processed and audiobook saved successfully at {audio_path} 🎧"
+            "message": "PDF processed successfully 🎧"
         })
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
-# Download endpoint
+# =====================================================
+# 🔹 /download/ — Sample audio test endpoint
+# =====================================================
 @app.get("/download/")
 async def download_file():
     output_dir = os.path.join(os.getcwd(), "output")
     sample_path = os.path.join(output_dir, "audiobook_sample.mp3")
+
     if not os.path.exists(sample_path):
         os.makedirs(output_dir, exist_ok=True)
         tts = gTTS("This is a sample audiobook file.")
         tts.save(sample_path)
+
     return FileResponse(sample_path, filename="audiobook_sample.mp3")
 
 
+# =====================================================
+# 🔹 Root route
+# =====================================================
 @app.get("/")
 def home():
-    return {"message": "AI Audiobook Generator API is running 🚀"}
+    return {"message": "AI Audiobook Generator (Ensemble NER) is running 🚀"}
