@@ -47,19 +47,56 @@ def clean_text(text: str) -> str:
 
 
 # =====================================================
-# 🔹 Individual extractors
+# 🔹 FIXED VERSION: extract_characters_trained()
 # =====================================================
 def extract_characters_trained(text: str):
-    """Extract characters using your fine-tuned DistilBERT model."""
-    results = ner_pipeline(text)
-    names = {ent["word"].replace("##", "").strip()
-             for ent in results
-             if ent["entity_group"].upper() in ("PER", "PERSON")}
+    """Extract characters using your fine-tuned DistilBERT model (handles subword truncation + key errors)."""
+    # Use raw token-level output
+    results = ner_pipeline(text, aggregation_strategy=None)
+
+    merged_spans = []
+    current = None
+
+    for ent in results:
+        # Some HF versions use 'entity_group' instead of 'entity'
+        label = ent.get("entity") or ent.get("entity_group")
+        if not label:
+            continue
+
+        if label.startswith("B-"):
+            if current:
+                merged_spans.append(current)
+            current = {"start": ent["start"], "end": ent["end"], "label": label.split("-")[-1]}
+        elif label.startswith("I-") and current:
+            current["end"] = ent["end"]
+        else:
+            if current:
+                merged_spans.append(current)
+                current = None
+
+    if current:
+        merged_spans.append(current)
+
+    names = set()
+    for span in merged_spans:
+        if span["label"].upper() in ["PER", "PERSON"]:
+            # Extract text by character offsets (preserves all subwords)
+            name = text[span["start"]:span["end"]]
+            name = re.sub(r"\s?##", "", name)
+            name = re.sub(r"\s+", " ", name).strip()
+            if len(name) > 1:
+                names.add(name)
+
+    # Add Narrator if dialogues exist
     if '"' in text and "Narrator" not in names:
         names.add("Narrator")
+
     return names
 
 
+# =====================================================
+# 🔹 Other extractors (unchanged)
+# =====================================================
 def extract_characters_spacy(text: str):
     """Extract characters using spaCy Transformer NER."""
     doc = spacy_nlp(text)
@@ -107,7 +144,6 @@ def ensemble_characters(text: str):
         for phrase in ["narrator", "she thought", "he thought", "reflected", "recalled"]
     )
 
-    # Add narrator if story is narrative-heavy
     if (
         ("narrator" in lower_text)
         or (narrative_clues)
@@ -119,6 +155,10 @@ def ensemble_characters(text: str):
     # Post-process cleanup
     return clean_character_list(final)
 
+
+# =====================================================
+# 🔹 Clean-up function (with "s" preservation fix)
+# =====================================================
 def clean_character_list(characters):
     """Post-process raw detected entities into clean unique character names."""
     cleaned = set()
@@ -151,13 +191,10 @@ def clean_character_list(characters):
         name = " ".join(name_parts)
 
         # Remove if likely a title or not a person
-        if re.match(r"^The\s+[A-Z]", name):  # e.g., "The Shadow Weaver"
+        if re.match(r"^The\s+[A-Z]", name):
             continue
         if any(w.lower() in {"pleaded", "said", "asked", "told", "replied"} for w in name.split()):
             continue
-
-        # Remove obvious plurals
-        name = re.sub(r"s$", "", name)
 
         cleaned.add(name)
 
@@ -168,6 +205,8 @@ def clean_character_list(characters):
             final.append(cand)
 
     return final
+
+
 # =====================================================
 # 🔹 /paste-text/ — Detect characters + generate audio
 # =====================================================
@@ -275,4 +314,4 @@ async def download_file():
 # =====================================================
 @app.get("/")
 def home():
-    return {"message": "AI Audiobook Generator (Ensemble NER) is running 🚀"}
+    return {"message": "AI Audiobook Generator (Ensemble NER, Subword Fix) is running 🚀"}
