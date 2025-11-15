@@ -162,41 +162,72 @@ def ensemble_characters(text: str):
 def clean_character_list(characters):
     """Post-process raw detected entities into clean unique character names."""
     cleaned = set()
+
+    # Words that indicate CHAPTER TITLES or STORY SECTIONS, NOT PEOPLE
+    chapter_words = {
+        "echoes", "chronicles", "tales", "shadows", "stories",
+        "legends", "journey", "saga", "notes", "diary", "memories",
+        "accounts", "episodes", "relics", "voices", "whispers"
+    }
+
     for name in characters:
+        raw = name
         name = name.strip()
 
         # Skip empty or too short
         if len(name) < 3:
             continue
 
-        # Remove weird subword artifacts
+        # Remove artifacts
         name = re.sub(r"##", "", name)
-        name = re.sub(r"\s+", " ", name).strip()
-
-        # Fix spacing around apostrophes (e.g., D ' Souza -> D'Souza)
+        name = re.sub(r"\s+", " ", name)
         name = re.sub(r"\s*'\s*", "'", name)
+        name = re.sub(r"(^|\s)\.\s*", " ", name)
+        name = name.strip()
 
-        # Fix spacing after periods (e.g., . D -> D)
-        name = re.sub(r"(^|\s)\.\s*", " ", name).strip()
-
-        # Capitalize correctly while preserving apostrophes (e.g., D'Souza)
-        name_parts = []
-        for part in name.split():
-            if "'" in part:
-                sub = part.split("'")
-                sub = [s.capitalize() for s in sub if s]
-                name_parts.append("'".join(sub))
+        # Proper capitalization
+        parts = []
+        for p in name.split():
+            if "'" in p:
+                subs = [s.capitalize() for s in p.split("'") if s]
+                parts.append("'".join(subs))
             else:
-                name_parts.append(part.capitalize())
-        name = " ".join(name_parts)
+                parts.append(p.capitalize())
+        name = " ".join(parts)
 
-        # Remove if likely a title or not a person
+        lowered = name.lower()
+
+        # ❌ Reject if name STARTS with any chapter word
+        if any(lowered.startswith(w) for w in chapter_words):
+            continue
+
+        # ❌ Reject "Echoes Of Kyoto" / "Tales Of London" / "Legends Of..."
+        if " of " in lowered:
+            first = lowered.split()[0]
+            if first in chapter_words:
+                continue
+
+        # ❌ Reject "The Shadow Weaver", "The Silent Storm", "The Last Sunrise"
         if re.match(r"^The\s+[A-Z]", name):
             continue
+
+        # ❌ Reject action verbs or mis-labeled text
         if any(w.lower() in {"pleaded", "said", "asked", "told", "replied"} for w in name.split()):
             continue
 
         cleaned.add(name)
+
+    # Deduplicate intelligently
+    final = []
+    for cand in sorted(cleaned, key=len, reverse=True):
+        if not any(
+            cand.lower() == other.lower() or
+            cand.lower() in other.lower()
+            for other in final
+        ):
+            final.append(cand)
+
+    return final
 
     # Merge duplicates (case-insensitive)
     final = []
