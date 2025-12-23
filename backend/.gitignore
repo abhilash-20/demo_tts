@@ -17,6 +17,7 @@ venv/
 .venv/
 ENV/
 env/
+.env
 
 # =========================
 # FastAPI / Uvicorn
@@ -78,3 +79,13 @@ build/
 # Docker (optional)
 # =========================
 docker-compose.override.yml
+
+# =========================
+# NER model
+# =========================
+wikiann-distilbert-ner/
+
+# =========================
+# outputs audio files
+# =========================
+output/
