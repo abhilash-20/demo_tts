@@ -89,3 +89,8 @@ wikiann-distilbert-ner/
 # outputs audio files
 # =========================
 output/
+*.zip
+*.safetensors
+*.bin
+*.pt
+
