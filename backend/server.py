@@ -12,6 +12,7 @@ import spacy
 from transformers import pipeline as hf_pipeline
 from supabase_client import supabase
 from fastapi.middleware.cors import CORSMiddleware
+import requests
 
 app = FastAPI()
 
@@ -31,7 +32,7 @@ app.add_middleware(
 )
 
 # =====================================================
-# 🔹 Load your fine-tuned DistilBERT NER model
+# Load your fine-tuned DistilBERT NER model
 # =====================================================
 MODEL_DIR = "./wikiann-distilbert-ner"  # folder containing your unzipped wikiann-distilbert-ner
 tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
@@ -42,9 +43,9 @@ ner_pipeline = pipeline("ner", model=model, tokenizer=tokenizer,
                         aggregation_strategy="simple", device=device)
 
 # =====================================================
-# 🔹 Load additional NER tools for ensemble
+# Load additional NER tools for ensemble
 # =====================================================
-print("🔹 Loading spaCy and Hugging Face models for ensemble...")
+print("Loading spaCy and Hugging Face models for ensemble...")
 spacy_nlp = spacy.load("en_core_web_sm")
 
 hf_ner = hf_pipeline("ner",
@@ -52,7 +53,7 @@ hf_ner = hf_pipeline("ner",
                      aggregation_strategy="simple",
                      device=device)
 
-print("✅ All models loaded successfully.")
+print("All models loaded successfully.")
 
 # =====================================================
 # 🔹 Helper: Clean input text
@@ -64,7 +65,7 @@ def clean_text(text: str) -> str:
 
 
 # =====================================================
-# 🔹 FIXED VERSION: extract_characters_trained()
+# FIXED VERSION: extract_characters_trained()
 # =====================================================
 def extract_characters_trained(text: str):
     """Extract characters using your fine-tuned DistilBERT model (handles subword truncation + key errors)."""
@@ -112,7 +113,7 @@ def extract_characters_trained(text: str):
 
 
 # =====================================================
-# 🔹 Other extractors (unchanged)
+# Other extractors (unchanged)
 # =====================================================
 def extract_characters_spacy(text: str):
     """Extract characters using spaCy Transformer NER."""
@@ -135,7 +136,7 @@ def extract_characters_hf(text: str):
 
 
 # =====================================================
-# 🔹 Ensemble extractor (union of all three)
+# Ensemble extractor (union of all three)
 # =====================================================
 def ensemble_characters(text: str):
     """Combine results from trained model, spaCy, and Hugging Face NER."""
@@ -152,7 +153,7 @@ def ensemble_characters(text: str):
         if not any(cand in other for other in final):
             final.append(cand)
 
-    # ✅ Enhanced Narrator Detection
+    # Enhanced Narrator Detection
     lower_text = text.lower()
     dialogue_quotes = text.count('"') + text.count("'")
     long_paragraphs = sum(1 for para in text.split("\n") if len(para) > 100)
@@ -174,7 +175,7 @@ def ensemble_characters(text: str):
 
 
 # =====================================================
-# 🔹 Clean-up function (with "s" preservation fix)
+# Clean-up function (with "s" preservation fix)
 # =====================================================
 def clean_character_list(characters):
     """Post-process raw detected entities into clean unique character names."""
@@ -214,21 +215,21 @@ def clean_character_list(characters):
 
         lowered = name.lower()
 
-        # ❌ Reject if name STARTS with any chapter word
+        # Reject if name STARTS with any chapter word
         if any(lowered.startswith(w) for w in chapter_words):
             continue
 
-        # ❌ Reject "Echoes Of Kyoto" / "Tales Of London" / "Legends Of..."
+        # Reject "Echoes Of Kyoto" / "Tales Of London" / "Legends Of..."
         if " of " in lowered:
             first = lowered.split()[0]
             if first in chapter_words:
                 continue
 
-        # ❌ Reject "The Shadow Weaver", "The Silent Storm", "The Last Sunrise"
+        # Reject "The Shadow Weaver", "The Silent Storm", "The Last Sunrise"
         if re.match(r"^The\s+[A-Z]", name):
             continue
 
-        # ❌ Reject action verbs or mis-labeled text
+        # Reject action verbs or mis-labeled text
         if any(w.lower() in {"pleaded", "said", "asked", "told", "replied"} for w in name.split()):
             continue
 
@@ -254,9 +255,45 @@ def clean_character_list(characters):
 
     return final
 
+def extract_characters_with_gender(text: str):
+    characters = ensemble_characters(text)
+    profiles = []
+
+    for char in characters:
+        if char == "Narrator":
+            profiles.append({
+                "character": char,
+                "gender": "neutral",
+                "confidence": 1.0,
+                "source": "system"
+            })
+            continue
+
+        genderData = get_gender_info(text, char)
+
+        profiles.append({
+            "character": char,
+            "gender": genderData["gender"],
+            "confidence": genderData["confidence"],
+            "source": "ensemble"
+        })
+
+    return profiles
+
+def get_gender_info(text: str, character: str):
+    response = requests.post(
+        "http://localhost:9000/detect-gender/",
+        json={"text": text,"character": character},
+        timeout=20
+    )
+    response.raise_for_status()
+    print("gender response:", response.json())
+    return response.json()
+
+
 
 # =====================================================
-# 🔹 /paste-text/ — Detect characters + generate audio
+# /paste-text/ — Detect characters + generate audio
 # =====================================================
 @app.post("/paste-text/")
 async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
@@ -264,7 +301,14 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
         start_time = time.time()
 
         cleaned = clean_text(text)
-        characters = ensemble_characters(cleaned)
+        # characters = ensemble_characters(cleaned)
+        # characters = extract_characters_with_gender(cleaned)
+        #  gender_data = get_gender_info(cleaned)
+
+        gender_data = extract_characters_with_gender(cleaned)
+
+        characters_detected = gender_data
+
         # characters_int = [ord(c) for c in characters]
 
         # Generate audiobook
@@ -299,7 +343,7 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
             "audio_url": public_url,
             "duration": None,
             "status": "completed",
-            "characters_detected": characters,
+            "characters_detected": characters_detected,
             "text_length": len(cleaned),
             "generation_time_seconds": gen_time,
             "message": "Audiobook generated successfully 🎧"
@@ -313,7 +357,7 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
             .execute()
         )
 
-        inserted_row = response.data[0]  # 👈 ALL fields here
+        inserted_row = response.data[0]  # ALL fields here
 
         return JSONResponse({
             "success": True,
@@ -328,7 +372,7 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
 
 
 # =====================================================
-# 🔹 /upload-pdf/ — Process PDF & generate audiobook
+# /upload-pdf/ — Process PDF & generate audiobook
 # =====================================================
 
 
@@ -355,8 +399,13 @@ async def upload_pdf(file: UploadFile,title: str = Form(...) ):
             return JSONResponse({"error": "No text found in PDF"}, status_code=400)
 
         cleaned = clean_text(extracted_text)
-        characters = ensemble_characters(cleaned)
+        # characters = ensemble_characters(cleaned)
+        # characters = extract_characters_with_gender(cleaned)
         # characters_int = [ord(c) for c in characters if len(c) == 1]
+
+        gender_data = extract_characters_with_gender(cleaned)
+
+        characters_detected = gender_data
 
         # Generate TTS
         output_dir = os.path.join(os.getcwd(), "output")
@@ -389,14 +438,14 @@ async def upload_pdf(file: UploadFile,title: str = Form(...) ):
             "audio_url": public_url,  # later replace with public URL
             "duration": None,
             "status": "completed",
-            "characters_detected": characters,
+            "characters_detected": characters_detected,
             "text_length": len(cleaned),
             "generation_time_seconds": gen_time,
             "message": "PDF processed successfully 🎧"
         }).execute()
 
         return JSONResponse({
-            "characters_detected": characters,
+            "characters_detected": characters_detected,
             "text_length": len(cleaned),
             "audiobook_file": audio_path,
             "generation_time_seconds": gen_time,
@@ -415,7 +464,7 @@ async def upload_pdf(file: UploadFile,title: str = Form(...) ):
 
 
 # =====================================================
-# 🔹 /download/ — Sample audio test endpoint
+# /download/ — Sample audio test endpoint
 # =====================================================
 @app.get("/download/")
 async def download_file():
@@ -431,7 +480,7 @@ async def download_file():
 
 
 # =====================================================
-# 🔹 Root route
+# Root route
 # =====================================================
 @app.get("/")
 def home():

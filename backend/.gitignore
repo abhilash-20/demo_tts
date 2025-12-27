@@ -18,6 +18,7 @@ venv/
 ENV/
 env/
 .env
+gender_detection/venv_allennlp
 
 # =========================
 # FastAPI / Uvicorn
@@ -84,6 +85,7 @@ docker-compose.override.yml
 # NER model
 # =========================
 wikiann-distilbert-ner/
+gender_detection/models
 
 # =========================
 # outputs audio files
