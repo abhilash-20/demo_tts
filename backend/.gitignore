@@ -86,6 +86,7 @@ docker-compose.override.yml
 # =========================
 wikiann-distilbert-ner/
 gender_detection/models
+gender_detection/litbank_output
 
 # =========================
 # outputs audio files

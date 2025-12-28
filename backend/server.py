@@ -284,7 +284,7 @@ def get_gender_info(text: str, character: str):
     response = requests.post(
         "http://localhost:9000/detect-gender/",
         json={"text": text,"character": character},
-        timeout=20
+        timeout=120
     )
     response.raise_for_status()
     print("gender response:", response.json())

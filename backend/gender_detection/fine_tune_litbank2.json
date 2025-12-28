@@ -1,0 +1,100 @@
+{
+  "dataset_reader": {
+    "type": "coref",
+    "max_sentences": 15,
+    "max_span_width": 30,
+    "token_indexers": {
+      "tokens": {
+        "type": "pretrained_transformer_mismatched",
+        "model_name": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/spanbert-large-cased",
+        "max_length": 128
+      }
+    },
+    "wordpiece_modeling_tokenizer": {
+      "model_name": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/spanbert-large-cased",
+      "max_length": 128
+    }
+  },
+  "validation_dataset_reader": {
+    "type": "coref",
+    "max_sentences": 15,
+    "max_span_width": 30,
+    "token_indexers": {
+      "tokens": {
+        "type": "pretrained_transformer_mismatched",
+        "model_name": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/spanbert-large-cased",
+        "max_length": 128
+      }
+    },
+    "wordpiece_modeling_tokenizer": {
+      "model_name": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/spanbert-large-cased",
+      "max_length": 128
+    }
+  },
+  "train_data_path": "E:/Final Year Project/train-test-split/train.conll",
+  "validation_data_path": "E:/Final Year Project/train-test-split/dev.conll",
+  "model": {
+    "type": "coref",
+    "max_span_width": 30,
+    "spans_per_word": 0.2,
+    "max_antecedents": 20,
+    "coarse_to_fine": true,
+    "inference_order": 2,
+    "feature_size": 20,
+    "initializer": {
+      "regexes": [
+        [
+          ".*", 
+          {
+            "type": "pretrained",
+            "weights_file_path": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/coref-spanbert-large-2021.03.10.tar.gz"
+          }
+        ]
+      ]
+    },
+    "text_field_embedder": {
+      "token_embedders": {
+        "tokens": {
+          "type": "pretrained_transformer_mismatched",
+          "model_name": "C:/Users/chinm/c tutorials/Final Year Project/backend/gender_detection/models/spanbert-large-cased",
+          "max_length": 128
+        }
+      }
+    },
+    "context_layer": {
+      "type": "pass_through",
+      "input_dim": 1024
+    },
+    "mention_feedforward": {
+      "input_dim": 3092,
+      "num_layers": 2,
+      "hidden_dims": 1500,
+      "activations": "relu",
+      "dropout": 0.3
+    },
+    "antecedent_feedforward": {
+      "input_dim": 9296,
+      "num_layers": 2,
+      "hidden_dims": 1500,
+      "activations": "relu",
+      "dropout": 0.3
+    }
+  },
+  "data_loader": {
+    "batch_sampler": {
+      "type": "bucket",
+      "batch_size": 1
+    }
+  },
+  "trainer": {
+    "num_epochs": 5,
+    "patience": 3,
+    "cuda_device": -1,
+    "validation_metric": "+coref_f1",
+    "optimizer": {
+      "type": "adamw",
+      "lr": 3e-5,
+      "weight_decay": 0.01
+    }
+  }
+}
