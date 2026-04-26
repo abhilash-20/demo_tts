@@ -1,5 +1,5 @@
 from .name_based import name_gender_score
-from .pronoun_based import pronoun_gender_score
+from .pronoun_based_generative import generative_pronoun_gender_score
 from .context_based import context_gender_score
 
 
@@ -43,7 +43,7 @@ def ensemble_gender(text: str, character: str):
     print("Name-based output:", character, name_g, name_c)
 
     # Pronoun-based
-    g, c = pronoun_gender_score(text, character)
+    g, c = generative_pronoun_gender_score(text, character)
     if g in scores:
         scores[g] += 0.5 * c
 

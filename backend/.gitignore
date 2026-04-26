@@ -19,6 +19,7 @@ ENV/
 env/
 .env
 gender_detection/venv_allennlp
+gender_detection/venv_llama
 
 # =========================
 # FastAPI / Uvicorn

@@ -1,0 +1,97 @@
+{
+    "dataset_reader": {
+        "type": "coref",
+        "max_sentences": 15,
+        "max_span_width": 30,
+        "token_indexers": {
+            "tokens": {
+                "type": "pretrained_transformer_mismatched",
+                "max_length": 128,
+                "model_name": "C:\\Users\\chinm\\c tutorials\\Final Year Project\\backend\\gender_detection\\models\\spanbert-large-cased"
+            }
+        }
+    },
+    "model": {
+        "type": "coref",
+        "context_layer": {
+            "type": "pass_through",
+            "input_dim": 1024
+        },
+        "max_span_width": 30,
+        "spans_per_word": 0.2,
+        "max_antecedents": 20,
+        "feature_size": 20,
+        "text_field_embedder": {
+            "token_embedders": {
+                "tokens": {
+                    "type": "pretrained_transformer_mismatched",
+                    "max_length": 128,
+                    "model_name": "C:\\Users\\chinm\\c tutorials\\Final Year Project\\backend\\gender_detection\\models\\spanbert-large-cased"
+                }
+            }
+        },
+        "mention_feedforward": {
+            "input_dim": 3092,
+            "hidden_dims": 1500,
+            "num_layers": 2,
+            "activations": "relu",
+            "dropout": 0.3
+        },
+        "antecedent_feedforward": {
+            "input_dim": 9296,
+            "hidden_dims": 1500,
+            "num_layers": 2,
+            "activations": "relu",
+            "dropout": 0.3
+        },
+        "initializer": {
+            "regexes": [
+                [".*linear_layers.*weight", {"type": "xavier_normal"}],
+                ["_distance_embedding.weight", {"type": "xavier_normal"}],
+                ["_span_width_embedding.weight", {"type": "xavier_normal"}],
+                [
+                    ".*_span_updating_gated_sum.*weight",
+                    {
+                        "type": "xavier_normal"
+                    }
+                ],
+                [
+                    ".*scorer.*weight",
+                    {
+                        "type": "xavier_normal"
+                    }
+                ],
+                [
+                    "_context_layer._module.weight_ih.*",
+                    {
+                        "type": "xavier_normal"
+                    }
+                ],
+                [
+                    "_context_layer._module.weight_hh.*",
+                    {
+                        "type": "orthogonal"
+                    }
+                ]
+            ]
+        }
+    },
+    "train_data_path": "E:/Final Year Project/train-test-split/train.conll",
+    "validation_data_path": "E:/Final Year Project/train-test-split/dev.conll",
+    "trainer": {
+        "num_epochs": 10,
+        "patience": 3,
+        "cuda_device": 0,
+        "validation_metric": "+coref_f1",
+        "optimizer": {
+            "type": "huggingface_adamw",
+            "lr": 3e-5
+        }
+    },
+    "data_loader": {
+        "batch_sampler": {
+            "type": "bucket",
+            "batch_size": 1
+        }
+    }
+}

@@ -255,7 +255,43 @@ def clean_character_list(characters):
 
     return final
 
-def extract_characters_with_gender(text: str):
+import requests
+
+# Ensure your URL includes the endpoint path!
+COLAB_API_URL = "https://inspired-quail-partly.ngrok-free.app/speaker_attribution"
+
+def speaker_attribution_api_call(text: str, characters: list, profiles:list):
+    try:
+        payload = {
+            "text": text,
+            "characters": characters,
+            "gender_predictions": profiles
+        }
+        
+        # This header is the secret to bypassing the ngrok splash screen
+        headers = {
+            "ngrok-skip-browser-warning": "69420"
+        }
+        
+        response = requests.post(
+            COLAB_API_URL, 
+            json=payload, 
+            headers=headers, 
+            timeout=None  # LLMs take time, so we set a long timeout
+        )
+        
+        # Check if the response is actually JSON
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Server returned error {response.status_code}: {response.text}")
+            return "unknown", 0.0
+            
+    except Exception as e:
+        print(f"Error connecting to Colab: {e}")
+        return "unknown", 0.0
+
+def extract_characters_with_gender(text: str, uncleaned_text: str):
     characters = ensemble_characters(text)
     profiles = []
 
@@ -278,13 +314,17 @@ def extract_characters_with_gender(text: str):
             "source": "ensemble"
         })
 
-    return profiles
+    # gender_dict = {p["character"]: p["gender"] for p in profiles}
+
+    speakerData = speaker_attribution_api_call(uncleaned_text, characters, profiles)
+
+    return speakerData
 
 def get_gender_info(text: str, character: str):
     response = requests.post(
         "http://localhost:9000/detect-gender/",
         json={"text": text,"character": character},
-        timeout=120
+        timeout=None
     )
     response.raise_for_status()
     print("gender response:", response.json())
@@ -305,7 +345,7 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
         # characters = extract_characters_with_gender(cleaned)
         #  gender_data = get_gender_info(cleaned)
 
-        gender_data = extract_characters_with_gender(cleaned)
+        gender_data = extract_characters_with_gender(cleaned,text)
 
         characters_detected = gender_data
 
@@ -323,45 +363,48 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
 
         gen_time = round(time.time() - start_time, 2)
 
-        with open(audio_path, "rb") as f:
-            supabase.storage.from_("audiobooks").upload(
-            path=audio_filename,
-            file=f,
-            file_options={
-                "content-type": "audio/mpeg"
-            }
-        )
+        # with open(audio_path, "rb") as f:
+        #     supabase.storage.from_("audiobooks").upload(
+        #     path=audio_filename,
+        #     file=f,
+        #     file_options={
+        #         "content-type": "audio/mpeg"
+        #     }
+        # )
 
-        public_url = supabase.storage.from_("audiobooks").get_public_url(audio_filename)
+        # public_url = supabase.storage.from_("audiobooks").get_public_url(audio_filename)
 
-        # Prepare DB row
-        data = {
-            "title": title,
-            "input_text": cleaned,
-            "input_method": "text",
-            "file_name": None,
-            "audio_url": public_url,
-            "duration": None,
-            "status": "completed",
-            "characters_detected": characters_detected,
-            "text_length": len(cleaned),
-            "generation_time_seconds": gen_time,
-            "message": "Audiobook generated successfully 🎧"
-        }
+        # # Prepare DB row
+        # data = {
+        #     "title": title,
+        #     "input_text": cleaned,
+        #     "input_method": "text",
+        #     "file_name": None,
+        #     "audio_url": public_url,
+        #     "duration": None,
+        #     "status": "completed",
+        #     "characters_detected": characters_detected,
+        #     "text_length": len(cleaned),
+        #     "generation_time_seconds": gen_time,
+        #     "message": "Audiobook generated successfully 🎧"
+        # }
 
-        # Insert into Supabase
-        response = (
-            supabase
-            .table("audiobook_generations")
-            .insert(data)
-            .execute()
-        )
+        # # Insert into Supabase
+        # response = (
+        #     supabase
+        #     .table("audiobook_generations")
+        #     .insert(data)
+        #     .execute()
+        # )
 
-        inserted_row = response.data[0]  # ALL fields here
+        # inserted_row = response.data[0]  # ALL fields here
 
+        # return JSONResponse({
+        #     "success": True,
+        #     "data": inserted_row
+        # })
         return JSONResponse({
-            "success": True,
-            "data": inserted_row
+            "characters_detected": characters_detected,
         })
 
     except Exception as e:
