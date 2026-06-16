@@ -221,23 +221,22 @@ def extract_quotes(text):
     return quotes
 
 
-
 def build_quote_context(text, char_start, char_end, max_total_chars=2500):
-    # quote_text = text[char_start:char_end]  # includes the quote marks
-    # char_start/char_end span the FULL match including marks (from extract_quotes' match.start()/end()),
-    # so strip the first and last character to get the same mark-free text used in "quote"
     quote_text = text[char_start + 1:char_end - 1]
 
     wrapped_overhead = len("<QUOTE></QUOTE>")
     remaining = max(max_total_chars - wrapped_overhead - len(quote_text), 0)
 
-    left_budget = remaining // 2
+    # ← Fix: match training's 35/65 split with 300 char right minimum
+    left_budget  = int(remaining * 0.35)
     right_budget = remaining - left_budget
+    right_budget = max(right_budget, 300)
+    left_budget  = remaining - right_budget
 
     left_start = max(char_start - left_budget, 0)
-    right_end = min(char_end + right_budget, len(text))
+    right_end  = min(char_end + right_budget, len(text))
 
-    left_context = text[left_start:char_start]
+    left_context  = text[left_start:char_start]
     right_context = text[char_end:right_end]
 
     return f"{left_context}<QUOTE>{quote_text}</QUOTE>{right_context}"
@@ -275,10 +274,8 @@ def build_quote_payloads(text, characters, max_context_chars=2500, max_candidate
 
         payloads.append({
             "quote": q["quote"],
-            "char_start": q["char_start"],
-            "char_end": q["char_end"],
-            "context": context,
-            "candidates": candidates
+            "context": context,       # already windowed + <QUOTE> tagged
+            "candidates": candidates  # no char_start/char_end needed by Colab
         })
 
     return payloads
