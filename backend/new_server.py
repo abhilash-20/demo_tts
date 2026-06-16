@@ -57,16 +57,7 @@ print("All models loaded successfully.")
 # =====================================================
 # CHARACTER ID REGISTRY
 # =====================================================
-char2id = {}
 next_char_id = 0
-
-def register_characters(characters):
-    global char2id, next_char_id
-    for name in characters:
-        if name not in char2id:
-            char2id[name] = next_char_id
-            next_char_id += 1
-    return char2id
 
 # =====================================================
 # CLEAN TEXT
@@ -214,16 +205,7 @@ def find_candidate_mentions(text, candidate_name):
 # =====================================================
 # QUOTE EXTRACTION
 # =====================================================
-# def extract_quotes(text):
-#     pattern = r'["""\u2018\u2019](.*?)["""\u2018\u2019]'
-#     quotes = []
-#     for match in re.finditer(pattern, text):
-#         quotes.append({
-#             "quote": match.group(1),
-#             "char_start": match.start(),
-#             "char_end": match.end()
-#         })
-#     return quotes
+
 def extract_quotes(text):
     # Match straight or curly single/double quotes
     pattern = r'["“”‘’](.*?)["“”‘’]'
@@ -238,233 +220,69 @@ def extract_quotes(text):
 
     return quotes
 
-# =====================================================
-# DISTANCE FEATURES
-# =====================================================
-def compute_distance_features(text, quote_start, candidate_name):
-    first_occurrence = text.find(candidate_name)
-    if first_occurrence == -1:
-        return [0.5, 0, 0, 0]
-    relative_position = abs(first_occurrence - quote_start) / len(text)
-    before = 1 if first_occurrence < quote_start else 0
-    after = 1 if first_occurrence > quote_start else 0
-    same_sentence = 0
-    return [relative_position, same_sentence, before, after]
 
-# =====================================================
-# BUILD CANDIDATES WITH ALL FEATURES
-# =====================================================
-'''
-def build_candidates_with_features(text, characters):
-    register_characters(characters)
+
+def build_quote_context(text, char_start, char_end, max_total_chars=2500):
+    # quote_text = text[char_start:char_end]  # includes the quote marks
+    # char_start/char_end span the FULL match including marks (from extract_quotes' match.start()/end()),
+    # so strip the first and last character to get the same mark-free text used in "quote"
+    quote_text = text[char_start + 1:char_end - 1]
+
+    wrapped_overhead = len("<QUOTE></QUOTE>")
+    remaining = max(max_total_chars - wrapped_overhead - len(quote_text), 0)
+
+    left_budget = remaining // 2
+    right_budget = remaining - left_budget
+
+    left_start = max(char_start - left_budget, 0)
+    right_end = min(char_end + right_budget, len(text))
+
+    left_context = text[left_start:char_start]
+    right_context = text[char_end:right_end]
+
+    return f"{left_context}<QUOTE>{quote_text}</QUOTE>{right_context}"
+
+
+def select_candidates(text, char_start, characters, max_candidates=10):
+    scored = []
+
+    for name in characters:
+        if name == "Narrator":
+            scored.append((float("inf"), name))
+            continue
+
+        mentions = find_candidate_mentions(text, name)
+
+        if mentions:
+            nearest = min(mentions, key=lambda m: abs(m["char_start"] - char_start))
+            distance = abs(nearest["char_start"] - char_start)
+        else:
+            distance = float("inf")
+
+        scored.append((distance, name))
+
+    scored.sort(key=lambda x: x[0])
+    return [name for _, name in scored[:max_candidates]]
+
+
+def build_quote_payloads(text, characters, max_context_chars=2500, max_candidates=10):
     quotes = extract_quotes(text)
-
-    all_quote_candidates = []
+    payloads = []
 
     for q in quotes:
-        candidates = []
-        for name in characters:
-            distance = compute_distance_features(
-                text,
-                q["char_start"],
-                name
-            )
-            # candidates.append({
-            #     "name": name,
-            #     "char_id": char2id[name],        # ✅ candidate_char_ids
-            #     "distance_features": distance,    # ✅ candidate_distance
-            #     "mask": 1                         # ✅ candidate_mask
-            # })
+        context = build_quote_context(text, q["char_start"], q["char_end"], max_context_chars)
+        candidates = select_candidates(text, q["char_start"], characters, max_candidates)
 
-            mentions = find_candidate_mentions(text, name)
-
-            if len(mentions) > 0:
-
-                nearest_mention = min(
-                    mentions,
-                    key=lambda m: abs(m["char_start"] - q["char_start"])
-                )
-
-            else:
-
-                nearest_mention = {
-                    "char_start": 0,
-                    "char_end": 1
-                }
-
-            candidates.append({
-
-                "name": name,
-
-                "mention_char_start":
-                    nearest_mention["char_start"],
-
-                "mention_char_end":
-                    nearest_mention["char_end"],
-
-                "distance_features": distance,
-
-                "mask": 1
-            })
-
-        all_quote_candidates.append({
+        payloads.append({
             "quote": q["quote"],
             "char_start": q["char_start"],
             "char_end": q["char_end"],
+            "context": context,
             "candidates": candidates
         })
 
-    return all_quote_candidates
-'''
-def build_candidates_with_features(text, characters):
-    register_characters(characters)
-    quotes = extract_quotes(text)
+    return payloads
 
-    all_quote_candidates = []
-
-    for q in quotes:
-        candidates = []
-        # for name in characters:
-        #     distance = compute_distance_features(
-        #         text,
-        #         q["char_start"],
-        #         name
-        #     )
-        #     # candidates.append({
-        #     #     "name": name,
-        #     #     "char_id": char2id[name],
-        #     #     "distance_features": distance,
-        #     #     "mask": 1
-        #     # })
-        #     mentions = find_candidate_mentions(text, name)
-
-        #     if len(mentions) > 0:
-
-        #         nearest_mention = min(
-        #             mentions,
-        #             key=lambda m: abs(m["char_start"] - q["char_start"])
-        #         )
-
-        #     else:
-
-        #         nearest_mention = {
-        #             "char_start": 0,
-        #             "char_end": 1
-        #         }
-
-        #     candidates.append({
-
-        #         "name": name,
-
-        #         "mention_char_start":
-        #             nearest_mention["char_start"],
-
-        #         "mention_char_end":
-        #             nearest_mention["char_end"],
-
-        #         "distance_features": distance,
-
-        #         "mask": 1
-        #     })
-        candidate_pool = []
-
-        for name in characters:
-
-            mentions = find_candidate_mentions(text, name)
-
-            if len(mentions) > 0:
-
-                nearest_mention = min(
-                    mentions,
-                    key=lambda m: abs(m["char_start"] - q["char_start"])
-                )
-
-                nearest_distance = abs(
-                    nearest_mention["char_start"] - q["char_start"]
-                )
-
-                candidate_mask=1
-
-            else:
-
-                nearest_mention = {
-                    "char_start": 0,
-                    "char_end": 1
-                }
-
-                nearest_distance = 999999
-
-                candidate_mask=0
-
-            distance = compute_distance_features(
-                text,
-                q["char_start"],
-                name
-            )
-
-            candidate_pool.append({
-
-                "name": name,
-
-                "mention_char_start":
-                    nearest_mention["char_start"],
-
-                "mention_char_end":
-                    nearest_mention["char_end"],
-
-                "distance_features": distance,
-
-                "mask": candidate_mask,
-
-                "nearest_distance": nearest_distance
-            })
-
-        # SORT nearest first
-        candidate_pool.sort(
-            key=lambda x: x["nearest_distance"]
-        )
-
-        # KEEP ONLY TOP 10
-        candidates = candidate_pool[:10]
-
-        while len(candidates) < 10:
-
-            candidates.append({
-
-                "name": "[PAD]",
-
-                "mention_char_start": 0,
-
-                "mention_char_end": 1,
-
-                "distance_features": [999.0, 999.0, 999.0, 999.0],
-
-                "mask": 0
-            })
-
-        # REMOVE helper field
-        for c in candidates:
-            c.pop("nearest_distance", None)
-
-        real_count = sum(c["mask"] for c in candidates)
-
-        print("REAL =", real_count)
-        print("TOTAL =", len(candidates))
-
-        # ✅ Add this
-        print(f"\nQuote: {q['quote']}")
-        for c in candidates:
-            print(f"  Character: {c['name']} | distance: {c['distance_features']} | mask: {c['mask']}")
-            
-
-        all_quote_candidates.append({
-            "quote": q["quote"],
-            "char_start": q["char_start"],
-            "char_end": q["char_end"],
-            "candidates": candidates
-        })
-
-    return all_quote_candidates
 # =====================================================
 # GENDER DETECTION
 # =====================================================
@@ -492,21 +310,16 @@ def get_gender_info(text: str, character: str):
 # =====================================================
 # SPEAKER ATTRIBUTION
 # =====================================================
-def speaker_attribution_api_call(text, characters, profiles, quote_candidates):
+def speaker_attribution_api_call(text, characters, profiles, quote_payloads):
     try:
         payload = {
             "text": text,
             "characters": characters,
             "gender_predictions": profiles,
-            "quote_candidates": quote_candidates    # ✅ includes char_ids, distance, mask
+            "quote_payloads": quote_payloads
         }
         headers = {"ngrok-skip-browser-warning": "69420"}
-        response = requests.post(
-            COLAB_API_URL,
-            json=payload,
-            headers=headers,
-            timeout=None
-        )
+        response = requests.post(COLAB_API_URL, json=payload, headers=headers, timeout=None)
         if response.status_code == 200:
             return response.json()
         else:
@@ -519,53 +332,7 @@ def speaker_attribution_api_call(text, characters, profiles, quote_candidates):
 # =====================================================
 # PIPELINE
 # =====================================================
-'''
-def extract_characters_with_gender(text: str, uncleaned_text: str):
-    characters = ensemble_characters(text)
-    profiles = []
 
-    for char in characters:
-        if char == "Narrator":
-            profiles.append({
-                "character": char,
-                "gender": "neutral",
-                "confidence": 1.0,
-                "source": "system"
-            })
-            continue
-        try:
-            genderData = get_gender_info(text, char)
-            profiles.append({
-                "character": char,
-                "gender": genderData["gender"],
-                "confidence": genderData["confidence"],
-                "source": "ensemble"
-            })
-        except Exception as e:
-            print(f"Gender detection failed for {char}: {e}")
-            profiles.append({
-                "character": char,
-                "gender": "unknown",
-                "confidence": 0.0,
-                "source": "fallback"
-            })
-
-    # ✅ Build quote candidates with char_ids, distance features and mask
-    quote_candidates = build_candidates_with_features(text, characters)
-
-    speakerData = speaker_attribution_api_call(
-        uncleaned_text,
-        characters,
-        profiles,
-        quote_candidates
-    )
-
-    return {
-        "characters": characters,
-        "profiles": profiles,
-        "speaker_data": speakerData
-    }
-'''
 def extract_characters_with_gender(text: str, uncleaned_text: str):
     characters = ensemble_characters(text)
     profiles = []
@@ -598,17 +365,17 @@ def extract_characters_with_gender(text: str, uncleaned_text: str):
    
 
     # ✅ Build quote candidates with char_ids, distance features and mask
-    quote_candidates = build_candidates_with_features(uncleaned_text, characters)
+    quote_payloads = build_quote_payloads(uncleaned_text, characters)
 
     print("Characters detected:", characters)
     print("Profiles:", profiles)
-    print("Quote candidates:", quote_candidates)
+    print("Quote payloads:", quote_payloads)
 
     speakerData = speaker_attribution_api_call(
         uncleaned_text,
         characters,
         profiles,
-        quote_candidates
+        quote_payloads
     )
 
     return {
