@@ -1,512 +1,137 @@
-# from TTS.api import TTS
-# from pydub import AudioSegment
-# import os
-# import random
-
-# # ==========================================================
-# # ---------------------- LOAD MODEL ------------------------
-# # ==========================================================
-
-# tts = TTS(
-#     model_name="tts_models/en/vctk/vits",
-#     gpu=False
-# )
-
-# # ==========================================================
-# # ---------------------- VOICE POOLS -----------------------
-# # ==========================================================
-
-# MALE_VOICES = [
-#     "p226",
-#     "p228",
-#     "p229",
-#     "p232",
-#     "p237",
-#     "p241"
-# ]
-
-# FEMALE_VOICES = [
-#     "p225",
-#     "p227",
-#     "p230",
-#     "p233",
-#     "p236",
-#     "p243"
-# ]
-
-# NEUTRAL_VOICE = "p231"
-
-# # ==========================================================
-# # -------------- SPEAKER → VOICE ASSIGNMENT ---------------
-# # ==========================================================
-
-# character_voice_map = {}
-
-# used_male = []
-# used_female = []
-
-
-# def assign_voice(
-#     speaker,
-#     gender,
-#     character_voice_map
-# ):
-
-#     # already assigned before
-#     if speaker in character_voice_map:
-#         return character_voice_map[speaker]
-
-#     # assign new voice
-#     if gender.lower() == "male":
-
-#         available = [
-#             v for v in MALE_VOICES
-#             if v not in used_male
-#         ]
-
-#         if len(available) == 0:
-#             available = MALE_VOICES
-
-#         selected_voice = random.choice(available)
-
-#         used_male.append(selected_voice)
-
-#     elif gender.lower() == "female":
-
-#         available = [
-#             v for v in FEMALE_VOICES
-#             if v not in used_female
-#         ]
-
-#         if len(available) == 0:
-#             available = FEMALE_VOICES
-
-#         selected_voice = random.choice(available)
-
-#         used_female.append(selected_voice)
-
-#     else:
-#         selected_voice = NEUTRAL_VOICE
-
-#     character_voice_map[speaker] = selected_voice
-
-#     return selected_voice
-
-# # ==========================================================
-# # -------- PROCESS EXACT SPEAKER ATTRIBUTION OUTPUT --------
-# # ==========================================================
-
-# def process_speaker_output(raw_output):
-
-#     processed_segments = []
-
-#     for idx, item in enumerate(raw_output):
-
-#         quote = item.get("quote", "").strip()
-
-#         # skip empty quotes
-#         if quote == "":
-#             continue
-
-#         speaker = item.get(
-#             "predicted_speaker",
-#             "Unknown"
-#         )
-
-#         gender = item.get(
-#             "predicted_gender",
-#             "neutral"
-#         )
-
-#         # assign voice dynamically
-#         assigned_voice = assign_voice(
-#             speaker,
-#             gender,
-#             character_voice_map
-#         )
-
-#         processed_segments.append({
-
-#             "segment_id": idx,
-
-#             "text": quote,
-
-#             "speaker": speaker,
-
-#             "gender": gender,
-
-#             "voice_id": assigned_voice
-#         })
-
-#     return processed_segments
-
-# # ==========================================================
-# # ---------------- GENERATE AUDIO FILES --------------------
-# # ==========================================================
-
-# def generate_audio(processed_segments):
-
-#     os.makedirs(
-#         "generated_audio",
-#         exist_ok=True
-#     )
-
-#     audio_files = []
-
-#     for segment in processed_segments:
-
-#         output_file = (
-#             f"generated_audio/"
-#             f"segment_{segment['segment_id']}.wav"
-#         )
-
-#         print("\n======================")
-#         print(f"Speaker : {segment['speaker']}")
-#         print(f"Gender  : {segment['gender']}")
-#         print(f"Voice   : {segment['voice_id']}")
-#         print(f"Text    : {segment['text']}")
-#         print("======================")
-
-#         tts.tts_to_file(
-#             text=segment["text"],
-#             speaker=segment["voice_id"],
-#             file_path=output_file
-#         )
-
-#         audio_files.append(output_file)
-
-#     return audio_files
-
-# # ==========================================================
-# # --------------------- MERGE AUDIO ------------------------
-# # ==========================================================
-
-# def merge_audio(audio_files):
-
-#     final_audio = AudioSegment.empty()
-
-#     for file in audio_files:
-
-#         segment = AudioSegment.from_wav(file)
-
-#         pause = AudioSegment.silent(
-#             duration=300
-#         )
-
-#         final_audio += segment + pause
-
-#     final_audio.export(
-#         "final_story.wav",
-#         format="wav"
-#     )
-
-#     print("\nFinal audiobook generated!")
-
-# # ==========================================================
-# # -------- EXACT STRUCTURE FROM YOUR PIPELINE --------------
-# # ==========================================================
-
-# speaker_output = [
-
-#     {
-#         "quote":
-#         "Mother, have you heard about our summer holidays yet?",
-
-#         "predicted_speaker":
-#         "Quentins",
-
-#         "predicted_gender":
-#         "male",
-
-#         "scores":
-#         [[0.0925]]
-#     },
-
-#     {
-#         "quote":
-#         "Can we go to Polseath as usual?",
-
-#         "predicted_speaker":
-#         "Julian",
-
-#         "predicted_gender":
-#         "male",
-
-#         "scores":
-#         [[0.0931]]
-#     },
-
-#     {
-#         "quote":
-#         "I feel sure we'll love it!",
-
-#         "predicted_speaker":
-#         "Anne",
-
-#         "predicted_gender":
-#         "female",
-
-#         "scores":
-#         [[0.1044]]
-#     },
-
-#     {
-#         "quote":
-#         "Well, your Aunt Fanny said that her Georgina would love a bit of company.",
-
-#         "predicted_speaker":
-#         "Daddy",
-
-#         "predicted_gender":
-#         "male",
-
-#         "scores":
-#         [[0.1011]]
-#     },
-
-#     {
-#         "quote":
-#         "It sounds exciting to me!",
-
-#         "predicted_speaker":
-#         "Mother",
-
-#         "predicted_gender":
-#         "female",
-
-#         "scores":
-#         [[0.0991]]
-#     }
-
-# ]
-
-# # ==========================================================
-# # ---------------------- PIPELINE --------------------------
-# # ==========================================================
-
-# processed_segments = process_speaker_output(
-#     speaker_output
-# )
-
-# print("\nProcessed Segments:\n")
-
-# for item in processed_segments:
-#     print(item)
-
-# audio_files = generate_audio(
-#     processed_segments
-# )
-
-# merge_audio(audio_files)
-
-# print("\nFinal Voice Mapping:")
-# print(character_voice_map)
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
 from TTS.api import TTS
 from pydub import AudioSegment
+import uvicorn
 import os
 import random
+import time
+
+app = FastAPI()
 
 # ==========================================================
-# ---------------------- LOAD MODEL ------------------------
+# LOAD MODEL ONCE AT STARTUP
 # ==========================================================
 
-tts = TTS(
+tts_engine = TTS(
     model_name="tts_models/en/vctk/vits",
     gpu=False
 )
 
 # ==========================================================
-# VERIFIED MALE VOICES
-# ==========================================================
-
-# ==========================================================
-# VERIFIED MALE VOICES
+# VOICE POOLS
 # ==========================================================
 
 MALE_VOICES = [
-    "p226",   # male
-    "p228",   # male
-    "p241"    # male
+    "p226", "p228", "p241",
+    "p232","p236","p231"
 ]
-
-# ==========================================================
-# VERIFIED FEMALE VOICES
-# ==========================================================
 
 FEMALE_VOICES = [
-    "p225",   # female
-    "p243"    # female
+    "p225", "p243","p260","p237","p227"
 ]
-
-# ==========================================================
-# NEUTRAL VOICE
-# ==========================================================
 
 NEUTRAL_VOICE = "p230"
 
 # ==========================================================
-# -------------- SPEAKER → VOICE ASSIGNMENT ---------------
+# REQUEST SCHEMA
 # ==========================================================
 
-character_voice_map = {}
+class SpeakerSegment(BaseModel):
+    quote: str
+    predicted_speaker: str
+    predicted_gender: str
 
-used_male = set()
-used_female = set()
+class TTSRequest(BaseModel):
+    results: List[SpeakerSegment]
+    output_filename: str = "final_story.wav"
 
+# ==========================================================
+# VOICE ASSIGNMENT
+# ==========================================================
 
-def assign_voice(
-    speaker,
-    gender,
-    character_voice_map
-):
+def assign_voice(speaker, gender, character_voice_map, used_male, used_female):
 
-    # ------------------------------------------------------
-    # if speaker already assigned before
-    # ------------------------------------------------------
     if speaker in character_voice_map:
         return character_voice_map[speaker]
 
     gender = gender.lower().strip()
 
-    # ------------------------------------------------------
-    # MALE SPEAKER
-    # ------------------------------------------------------
     if gender == "male":
+        available = [v for v in MALE_VOICES if v not in used_male]
+        if not available:
+            available = MALE_VOICES
+        selected = random.choice(available)
+        used_male.add(selected)
 
-        available_voices = [
-            voice
-            for voice in MALE_VOICES
-            if voice not in used_male
-        ]
-
-        # if all voices exhausted
-        if len(available_voices) == 0:
-            available_voices = MALE_VOICES
-
-        selected_voice = random.choice(
-            available_voices
-        )
-
-        used_male.add(selected_voice)
-
-    # ------------------------------------------------------
-    # FEMALE SPEAKER
-    # ------------------------------------------------------
     elif gender == "female":
+        available = [v for v in FEMALE_VOICES if v not in used_female]
+        if not available:
+            available = FEMALE_VOICES
+        selected = random.choice(available)
+        used_female.add(selected)
 
-        available_voices = [
-            voice
-            for voice in FEMALE_VOICES
-            if voice not in used_female
-        ]
-
-        # if all voices exhausted
-        if len(available_voices) == 0:
-            available_voices = FEMALE_VOICES
-
-        selected_voice = random.choice(
-            available_voices
-        )
-
-        used_female.add(selected_voice)
-
-    # ------------------------------------------------------
-    # NEUTRAL / UNKNOWN
-    # ------------------------------------------------------
     else:
+        selected = NEUTRAL_VOICE
 
-        selected_voice = NEUTRAL_VOICE
-
-    # ------------------------------------------------------
-    # SAVE SPEAKER -> VOICE MAP
-    # ------------------------------------------------------
-    character_voice_map[speaker] = selected_voice
-
-    return selected_voice
-
+    character_voice_map[speaker] = selected
+    return selected
 
 # ==========================================================
-# -------- PROCESS EXACT SPEAKER ATTRIBUTION OUTPUT --------
+# PROCESS SEGMENTS
 # ==========================================================
 
-def process_speaker_output(raw_output):
+def process_speaker_output(raw_output, character_voice_map, used_male, used_female):
 
     processed_segments = []
 
     for idx, item in enumerate(raw_output):
 
-        quote = item.get(
-            "quote",
-            ""
-        ).strip()
-
-        # skip empty quotes
-        if quote == "":
+        quote   = item.quote.strip()
+        if not quote:
             continue
 
-        speaker = item.get(
-            "predicted_speaker",
-            "Unknown"
-        )
+        speaker = item.predicted_speaker
+        gender  = item.predicted_gender
 
-        gender = item.get(
-            "predicted_gender",
-            "neutral"
-        )
-
-        # --------------------------------------------------
-        # ASSIGN VOICE USING PREDICTED GENDER
-        # --------------------------------------------------
-        assigned_voice = assign_voice(
-            speaker=speaker,
-            gender=gender,
-            character_voice_map=character_voice_map
+        voice = assign_voice(
+            speaker, gender,
+            character_voice_map,
+            used_male, used_female
         )
 
         processed_segments.append({
-
             "segment_id": idx,
-
-            "text": quote,
-
-            "speaker": speaker,
-
-            "gender": gender,
-
-            "voice_id": assigned_voice
+            "text":       quote,
+            "speaker":    speaker,
+            "gender":     gender,
+            "voice_id":   voice
         })
 
     return processed_segments
 
-
 # ==========================================================
-# ---------------- GENERATE AUDIO FILES --------------------
+# GENERATE INDIVIDUAL WAV FILES
 # ==========================================================
 
 def generate_audio(processed_segments):
 
-    os.makedirs(
-        "generated_audio",
-        exist_ok=True
-    )
-
+    os.makedirs("E:/audiobook_output/generated_audio", exist_ok=True)
     audio_files = []
 
     for segment in processed_segments:
 
-        output_file = (
-            f"generated_audio/"
-            f"segment_{segment['segment_id']}.wav"
-        )
+        output_file = f"E:/audiobook_output/generated_audio/segment_{segment['segment_id']}.wav"
 
-        print("\n======================")
+        print(f"\n======================")
         print(f"Speaker : {segment['speaker']}")
         print(f"Gender  : {segment['gender']}")
         print(f"Voice   : {segment['voice_id']}")
         print(f"Text    : {segment['text']}")
-        print("======================")
+        print(f"======================")
 
-        tts.tts_to_file(
+        tts_engine.tts_to_file(
             text=segment["text"],
             speaker=segment["voice_id"],
             file_path=output_file
@@ -516,129 +141,79 @@ def generate_audio(processed_segments):
 
     return audio_files
 
-
 # ==========================================================
-# --------------------- MERGE AUDIO ------------------------
+# MERGE WAV FILES
 # ==========================================================
 
-def merge_audio(audio_files):
+def merge_audio(audio_files, output_filename):
 
     final_audio = AudioSegment.empty()
 
     for file in audio_files:
-
         segment = AudioSegment.from_wav(file)
-
-        pause = AudioSegment.silent(
-            duration=300
-        )
-
+        pause   = AudioSegment.silent(duration=300)
         final_audio += segment + pause
 
-    final_audio.export(
-        "final_story4.wav",
-        format="wav"
-    )
-
-    print("\nFinal audiobook generated!")
+    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+    final_audio.export(output_filename, format="wav")
+    print(f"\nFinal audiobook saved → {output_filename}")
+    return output_filename
 
 
-# ==========================================================
-# -------- EXACT STRUCTURE FROM YOUR PIPELINE --------------
-# ==========================================================
-
-speaker_output = [
-
-    {
-        "quote":
-        "Mother, have you heard about our summer holidays yet?",
-
-        "predicted_speaker":
-        "Quentins",
-
-        "predicted_gender":
-        "male",
-
-        "scores":
-        [[0.0925]]
-    },
-
-    {
-        "quote":
-        "Can we go to Polseath as usual?",
-
-        "predicted_speaker":
-        "Julian",
-
-        "predicted_gender":
-        "male",
-
-        "scores":
-        [[0.0931]]
-    },
-
-    {
-        "quote":
-        "I feel sure we'll love it!",
-
-        "predicted_speaker":
-        "Anne",
-
-        "predicted_gender":
-        "female",
-
-        "scores":
-        [[0.1044]]
-    },
-
-    {
-        "quote":
-        "Well, your Aunt Fanny said that her Georgina would love a bit of company.",
-
-        "predicted_speaker":
-        "Daddy",
-
-        "predicted_gender":
-        "male",
-
-        "scores":
-        [[0.1011]]
-    },
-
-    {
-        "quote":
-        "It sounds exciting to me!",
-
-        "predicted_speaker":
-        "Mother",
-
-        "predicted_gender":
-        "female",
-
-        "scores":
-        [[0.0991]]
-    }
-
-]
 
 # ==========================================================
-# ---------------------- PIPELINE --------------------------
+# /generate-tts/  ENDPOINT
 # ==========================================================
 
-processed_segments = process_speaker_output(
-    speaker_output
-)
+@app.post("/generate-tts/")
+def generate_tts(request: TTSRequest):
+    try:
+        # fresh state per request
+        character_voice_map = {}
+        used_male           = set()
+        used_female         = set()
 
-print("\n=========== PROCESSED SEGMENTS ===========\n")
+        processed_segments = process_speaker_output(
+            request.results,
+            character_voice_map,
+            used_male,
+            used_female
+        )
 
-for item in processed_segments:
-    print(item)
+        print("\n=========== PROCESSED SEGMENTS ===========")
+        for item in processed_segments:
+            print(item)
 
-audio_files = generate_audio(
-    processed_segments
-)
+        audio_files = generate_audio(processed_segments)
 
-merge_audio(audio_files)
+        output_path = request.output_filename
+        final_path = merge_audio(audio_files, output_path)
 
-print("\n=========== FINAL VOICE MAPPING ===========")
-print(character_voice_map)
+        print("\n=========== FINAL VOICE MAPPING ===========")
+        print(character_voice_map)
+
+        return {
+            "status":        "success",
+            "audiobook_file": final_path,
+            "voice_mapping":  character_voice_map
+        }
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return {"status": "error", "message": str(e)}
+
+# ==========================================================
+# ROOT
+# ==========================================================
+
+@app.get("/")
+def home():
+    return {"message": "TTS microservice running"}
+
+# ==========================================================
+# MAIN
+# ==========================================================
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8100)

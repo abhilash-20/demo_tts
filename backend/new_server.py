@@ -31,6 +31,7 @@ app.add_middleware(
 # =====================================================
 GENDER_SERVER_URL = "https://theatrics-spooky-scared.ngrok-free.dev"
 COLAB_API_URL = "https://inspired-quail-partly.ngrok-free.app/speaker_attribution"
+TTS_SERVICE_URL = "http://localhost:8100/generate-tts/"
 
 # =====================================================
 # LOAD MODELS
@@ -280,6 +281,49 @@ def build_quote_payloads(text, characters, max_context_chars=2500, max_candidate
 
     return payloads
 
+def split_text_into_segments(text, quotes):
+    """
+    Splits text into alternating narrator and dialogue segments.
+    Returns a list of dicts: {type: 'narrator'|'dialogue', text: str, quote: str|None, speaker: None}
+    """
+    segments = []
+    prev_end = 0
+
+    for q in quotes:
+        # Narrator segment before this quote
+        narrator_text = text[prev_end:q["char_start"]].strip()
+        if narrator_text:
+            segments.append({
+                "type": "narrator",
+                "text": narrator_text,
+                "quote": None,
+                "speaker": "Narrator"
+            })
+
+        # Dialogue segment
+        segments.append({
+            "type": "dialogue",
+            "text": q["quote"],
+            "quote": q["quote"],
+            "char_start": q["char_start"],
+            "char_end": q["char_end"],
+            "speaker": None  # to be filled by Llama
+        })
+
+        prev_end = q["char_end"]
+
+    # Any remaining narrator text after last quote
+    trailing = text[prev_end:].strip()
+    if trailing:
+        segments.append({
+            "type": "narrator",
+            "text": trailing,
+            "quote": None,
+            "speaker": "Narrator"
+        })
+
+    return segments
+
 # =====================================================
 # GENDER DETECTION
 # =====================================================
@@ -330,6 +374,35 @@ def speaker_attribution_api_call(text, characters, profiles, quote_payloads):
 # PIPELINE
 # =====================================================
 
+# def extract_characters_with_gender(text: str, uncleaned_text: str):
+#     characters = ensemble_characters(text)
+#     profiles = []
+#     for char in characters:
+#         if char == "Narrator":
+#             profiles.append({
+#                 "character": char,
+#                 "gender": "neutral",
+#                 "confidence": 1.0,
+#                 "source": "system"
+#             })
+#             continue
+#         try:
+#             genderData = get_gender_info(text, char)
+#             profiles.append({
+#                 "character": char,
+#                 "gender": genderData["gender"],
+#                 "confidence": genderData["confidence"],
+#                 "source": "ensemble"
+#             })
+#         except Exception as e:
+#             print(f"Gender detection failed for {char}: {e}")
+#             profiles.append({
+#                 "character": char,
+#                 "gender": "unknown",
+#                 "confidence": 0.0,
+#                 "source": "fallback"
+#             })
+
 def extract_characters_with_gender(text: str, uncleaned_text: str):
     characters = ensemble_characters(text)
     profiles = []
@@ -358,6 +431,34 @@ def extract_characters_with_gender(text: str, uncleaned_text: str):
                 "confidence": 0.0,
                 "source": "fallback"
             })
+
+    quotes = extract_quotes(uncleaned_text)
+    quote_payloads = build_quote_payloads(uncleaned_text, characters)
+    
+    # ← NEW: build full segment list with narrator slots
+    segments = split_text_into_segments(uncleaned_text, quotes)
+
+    speakerData = speaker_attribution_api_call(
+        uncleaned_text,
+        characters,
+        profiles,
+        quote_payloads
+    )
+
+    # ← NEW: merge Llama predictions back into segments
+    if speakerData and "results" in speakerData:
+        dialogue_segments = [s for s in segments if s["type"] == "dialogue"]
+        for i, result in enumerate(speakerData["results"]):
+            if i < len(dialogue_segments):
+                dialogue_segments[i]["speaker"] = result["predicted_speaker"]
+                dialogue_segments[i]["predicted_gender"] = result.get("predicted_gender", "neutral")
+
+    return {
+        "characters": characters,
+        "profiles": profiles,
+        "speaker_data": speakerData,
+        "segments": segments   # ← full ordered segment list with narrator filled in
+    }
     
    
 
@@ -380,6 +481,24 @@ def extract_characters_with_gender(text: str, uncleaned_text: str):
         "profiles": profiles,
         "speaker_data": speakerData
     }
+
+# =====================================================
+# TTS SERVICE CALL
+# =====================================================
+
+def call_tts_service(speaker_results: list, output_filename: str) -> dict:
+    try:
+        payload = {
+            "results": speaker_results,
+            "output_filename": output_filename
+        }
+        response = requests.post(TTS_SERVICE_URL, json=payload, timeout=None)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"TTS service error: {e}")
+        return {"status": "error", "message": str(e)}
+
 # =====================================================
 # /paste-text/
 # =====================================================
@@ -390,12 +509,18 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
         cleaned = clean_text(text)
         analysis = extract_characters_with_gender(cleaned, text)
 
+        speaker_data    = analysis.get("speaker_data", {})
+        speaker_results = speaker_data.get("results", [])
+
+        
+        
+        audio_filename = f"E:/audiobook_output/audiobook_{int(time.time())}.wav"
+        tts_response   = call_tts_service(speaker_results, audio_filename)
         output_dir = os.path.join(os.getcwd(), "output")
         os.makedirs(output_dir, exist_ok=True)
-        audio_filename = f"audiobook_{int(time.time())}.mp3"
-        audio_path = os.path.join(output_dir, audio_filename)
-        tts = gTTS(cleaned)
-        tts.save(audio_path)
+        audio_path     = tts_response.get("audiobook_file", "unavailable")
+        # tts = gTTS(cleaned)
+        # tts.save(audio_path)
 
         gen_time = round(time.time() - start_time, 2)
 
@@ -403,10 +528,11 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
             "title": title,
             "characters_detected": analysis["characters"],
             "gender_profiles": analysis["profiles"],
-            "speaker_attribution": analysis["speaker_data"],
+            "speaker_attribution": speaker_results,
             "audiobook_file": audio_path,
             "generation_time_seconds": gen_time,
-            "message": "Analysis completed successfully"
+            "message": "Analysis and TTS completed successfully",
+            "segments": analysis["segments"],
         })
 
     except Exception as e:
@@ -414,16 +540,16 @@ async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
         print(traceback.format_exc())
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# =====================================================
-# /upload-pdf/
-# =====================================================
+# ==========================================================
+# UPDATED /upload-pdf/  (replace your existing one)
+# ==========================================================
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile, title: str = Form(...)):
-    tmp_path = None
+    tmp_path   = None
     start_time = time.time()
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            content = await file.read()
+            content  = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
@@ -434,26 +560,39 @@ async def upload_pdf(file: UploadFile, title: str = Form(...)):
                 extracted_text += page.extract_text() or ""
 
         if not extracted_text.strip():
-            return JSONResponse({"error": "No text found in PDF"}, status_code=400)
+            return JSONResponse(
+                {"error": "No text found in PDF"}, status_code=400
+            )
 
-        cleaned = clean_text(extracted_text)
-        analysis = extract_characters_with_gender(cleaned, extracted_text)  # ✅ fixed
+        cleaned  = clean_text(extracted_text)
+        analysis = extract_characters_with_gender(cleaned, extracted_text)
 
-        output_dir = os.path.join(os.getcwd(), "output")
+        # --------------------------------------------------
+        # pull the results list out of Colab's response
+        # --------------------------------------------------
+        speaker_data    = analysis.get("speaker_data", {})
+        speaker_results = speaker_data.get("results", [])
+
+        print("speaker_results:", speaker_results)
+
+        # --------------------------------------------------
+        # generate multi-voice audiobook via tts_test2
+        # --------------------------------------------------
+        audio_filename = f"E:/audiobook_output/pdf_audiobook_{int(time.time())}.wav"
+        tts_response   = call_tts_service(speaker_results, audio_filename)
+        audio_path     = tts_response.get("audiobook_file", "unavailable")
+
+        output_dir     = os.path.join(os.getcwd(), "output")
         os.makedirs(output_dir, exist_ok=True)
-        audio_filename = f"pdf_audiobook_{int(time.time())}.mp3"
-        audio_path = os.path.join(output_dir, audio_filename)
-        tts = gTTS(cleaned)
-        tts.save(audio_path)
 
         gen_time = round(time.time() - start_time, 2)
 
         return JSONResponse({
-            "title": title,
+            "title":               title,
             "characters_detected": analysis["characters"],
-            "gender_profiles": analysis["profiles"],
-            "speaker_attribution": analysis["speaker_data"],
-            "audiobook_file": audio_path,
+            "gender_profiles":     analysis["profiles"],
+            "speaker_attribution": speaker_results,
+            "audiobook_file":      audio_path,
             "generation_time_seconds": gen_time,
             "message": "PDF processed successfully"
         })
