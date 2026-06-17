@@ -12,6 +12,7 @@ import spacy
 from transformers import pipeline as hf_pipeline
 from fastapi.middleware.cors import CORSMiddleware
 import requests
+from supabase_client import supabase
 
 app = FastAPI()
 
@@ -463,33 +464,33 @@ def extract_characters_with_gender(text: str, uncleaned_text: str):
    
 
     # ✅ Build quote candidates with char_ids, distance features and mask
-    quote_payloads = build_quote_payloads(uncleaned_text, characters)
+    # quote_payloads = build_quote_payloads(uncleaned_text, characters)
 
-    print("Characters detected:", characters)
-    print("Profiles:", profiles)
-    print("Quote payloads:", quote_payloads)
+    # print("Characters detected:", characters)
+    # print("Profiles:", profiles)
+    # print("Quote payloads:", quote_payloads)
 
-    speakerData = speaker_attribution_api_call(
-        uncleaned_text,
-        characters,
-        profiles,
-        quote_payloads
-    )
+    # speakerData = speaker_attribution_api_call(
+    #     uncleaned_text,
+    #     characters,
+    #     profiles,
+    #     quote_payloads
+    # )
 
-    return {
-        "characters": characters,
-        "profiles": profiles,
-        "speaker_data": speakerData
-    }
+    # return {
+    #     "characters": characters,
+    #     "profiles": profiles,
+    #     "speaker_data": speakerData
+    # }
 
 # =====================================================
 # TTS SERVICE CALL
 # =====================================================
 
-def call_tts_service(speaker_results: list, output_filename: str) -> dict:
+def call_tts_service(segments: list, output_filename: str) -> dict:
     try:
         payload = {
-            "results": speaker_results,
+            "segments": segments,
             "output_filename": output_filename
         }
         response = requests.post(TTS_SERVICE_URL, json=payload, timeout=None)
@@ -499,6 +500,127 @@ def call_tts_service(speaker_results: list, output_filename: str) -> dict:
         print(f"TTS service error: {e}")
         return {"status": "error", "message": str(e)}
 
+# # =====================================================
+# # /paste-text/
+# # =====================================================
+# @app.post("/paste-text/")
+# async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
+#     try:
+#         start_time = time.time()
+#         cleaned = clean_text(text)
+#         analysis = extract_characters_with_gender(cleaned, text)
+
+#         segments = analysis.get("segments", [])   # ← use segments, not speaker_result
+
+#         # speaker_data    = analysis.get("speaker_data", {})
+#         # speaker_results = speaker_data.get("results", [])
+
+        
+        
+#         audio_filename = f"E:/audiobook_output/audiobook_{int(time.time())}.wav"
+#         tts_response   = call_tts_service(segments, audio_filename)
+#         output_dir = os.path.join(os.getcwd(), "output")
+#         os.makedirs(output_dir, exist_ok=True)
+#         audio_path     = tts_response.get("audiobook_file", "unavailable")
+
+#         gen_time = round(time.time() - start_time, 2)
+
+#         return JSONResponse({
+#             "title": title,
+#             "characters_detected": analysis["characters"],
+#             "gender_profiles": analysis["profiles"],
+#             "speaker_attribution": analysis.get("speaker_data", {}).get("results", []),
+#             "audiobook_file": audio_path,
+#             "generation_time_seconds": gen_time,
+#             "message": "Analysis and TTS completed successfully",
+#             "segments": analysis["segments"],
+#         })
+
+#     except Exception as e:
+#         import traceback
+#         print(traceback.format_exc())
+#         return JSONResponse({"error": str(e)}, status_code=500)
+
+# # ==========================================================
+# # UPDATED /upload-pdf/  (replace your existing one)
+# # ==========================================================
+# @app.post("/upload-pdf/")
+# async def upload_pdf(file: UploadFile, title: str = Form(...)):
+#     tmp_path   = None
+#     start_time = time.time()
+#     try:
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+#             content  = await file.read()
+#             tmp.write(content)
+#             tmp_path = tmp.name
+
+#         extracted_text = ""
+#         with open(tmp_path, "rb") as pdf_file:
+#             reader = PdfReader(pdf_file)
+#             for page in reader.pages:
+#                 extracted_text += page.extract_text() or ""
+
+#         if not extracted_text.strip():
+#             return JSONResponse(
+#                 {"error": "No text found in PDF"}, status_code=400
+#             )
+
+#         cleaned  = clean_text(extracted_text)
+#         analysis = extract_characters_with_gender(cleaned, extracted_text)
+
+#         segments = analysis.get("segments", [])   # ← use segments
+
+#         # --------------------------------------------------
+#         # pull the results list out of Colab's response
+#         # --------------------------------------------------
+#         # speaker_data    = analysis.get("speaker_data", {})
+#         # speaker_results = speaker_data.get("results", [])
+
+#         print("segments:", segments)
+
+#         # --------------------------------------------------
+#         # generate multi-voice audiobook via tts_test2
+#         # --------------------------------------------------
+#         audio_filename = f"E:/audiobook_output/pdf_audiobook_{int(time.time())}.wav"
+#         tts_response   = call_tts_service(segments, audio_filename)
+#         audio_path     = tts_response.get("audiobook_file", "unavailable")
+
+#         output_dir     = os.path.join(os.getcwd(), "output")
+#         os.makedirs(output_dir, exist_ok=True)
+
+#         gen_time = round(time.time() - start_time, 2)
+
+#         return JSONResponse({
+#             "title":               title,
+#             "characters_detected": analysis["characters"],
+#             "gender_profiles":     analysis["profiles"],
+#             "speaker_attribution": analysis.get("speaker_data", {}).get("results", []),
+#             "audiobook_file":      audio_path,
+#             "generation_time_seconds": gen_time,
+#             "message": "PDF processed successfully"
+#         })
+
+#     except Exception as e:
+#         import traceback
+#         print(traceback.format_exc())
+#         return JSONResponse({"error": str(e)}, status_code=500)
+
+#     finally:
+#         if tmp_path and os.path.exists(tmp_path):
+#             os.remove(tmp_path)
+
+# =====================================================
+# AUDIO DURATION HELPER
+# =====================================================
+def get_wav_duration_seconds(filepath: str) -> int:
+    try:
+        import wave
+        with wave.open(filepath, "r") as wf:
+            return int(wf.getnframes() / wf.getframerate())
+    except Exception:
+        return 0
+
+
 # =====================================================
 # /paste-text/
 # =====================================================
@@ -506,100 +628,172 @@ def call_tts_service(speaker_results: list, output_filename: str) -> dict:
 async def paste_text_endpoint(title: str = Form(...), text: str = Form(...)):
     try:
         start_time = time.time()
-        cleaned = clean_text(text)
-        analysis = extract_characters_with_gender(cleaned, text)
+        cleaned    = clean_text(text)
+        analysis   = extract_characters_with_gender(cleaned, text)
+        segments   = analysis.get("segments", [])
 
-        speaker_data    = analysis.get("speaker_data", {})
-        speaker_results = speaker_data.get("results", [])
-
-        
-        
-        audio_filename = f"E:/audiobook_output/audiobook_{int(time.time())}.wav"
-        tts_response   = call_tts_service(speaker_results, audio_filename)
-        output_dir = os.path.join(os.getcwd(), "output")
-        os.makedirs(output_dir, exist_ok=True)
-        audio_path     = tts_response.get("audiobook_file", "unavailable")
-        # tts = gTTS(cleaned)
-        # tts.save(audio_path)
+        audio_filename = f"audiobook_{int(time.time())}.wav"
+        full_audio_path = f"E:/audiobook_output/{audio_filename}"
+        tts_response    = call_tts_service(segments, full_audio_path)
+        local_audio_path = tts_response.get("audiobook_file", "unavailable")
 
         gen_time = round(time.time() - start_time, 2)
+        duration = get_wav_duration_seconds(local_audio_path)
+
+        # --------------------------------------------------
+        # UPLOAD WAV TO SUPABASE STORAGE
+        # --------------------------------------------------
+        with open(local_audio_path, "rb") as f:
+            supabase.storage.from_("audiobooks").upload(
+                path=audio_filename,
+                file=f,
+                file_options={"content-type": "audio/wav"}
+            )
+
+        public_url = supabase.storage.from_("audiobooks").get_public_url(audio_filename)
+
+        # --------------------------------------------------
+        # INSERT INTO SUPABASE DB
+        # --------------------------------------------------
+        data = {
+            "title":                   title,
+            "input_text":              cleaned,
+            "input_method":            "text",
+            "file_name":               audio_filename,
+            "audio_url":               public_url,
+            "duration":                duration,
+            "status":                  "completed",
+            "text_length":             len(cleaned),
+            "generation_time_seconds": gen_time,
+            "message":                 "Audiobook generated successfully 🎧",
+            "characters_detected":     analysis["characters"],
+            "gender_profiles":         analysis["profiles"],
+            "segments":                segments,
+            "speaker_attribution":     analysis.get("speaker_data", {}).get("results", []),
+        }
+
+        response     = supabase.table("audiobook_generations").insert(data).execute()
+        inserted_row = response.data[0]
 
         return JSONResponse({
-            "title": title,
-            "characters_detected": analysis["characters"],
-            "gender_profiles": analysis["profiles"],
-            "speaker_attribution": speaker_results,
-            "audiobook_file": audio_path,
-            "generation_time_seconds": gen_time,
-            "message": "Analysis and TTS completed successfully",
-            "segments": analysis["segments"],
+            "success":  True,
+            "data":     inserted_row
         })
 
     except Exception as e:
         import traceback
         print(traceback.format_exc())
+
+        # save failed record
+        try:
+            supabase.table("audiobook_generations").insert({
+                "title":         title,
+                "input_text":    text,
+                "input_method":  "text",
+                "status":        "failed",
+                "error_message": str(e),
+                "text_length":   len(text),
+            }).execute()
+        except Exception as db_err:
+            print(f"Failed to log error to Supabase: {db_err}")
+
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# ==========================================================
-# UPDATED /upload-pdf/  (replace your existing one)
-# ==========================================================
+
+# =====================================================
+# /upload-pdf/
+# =====================================================
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile, title: str = Form(...)):
-    tmp_path   = None
-    start_time = time.time()
+    tmp_path       = None
+    extracted_text = ""
+    start_time     = time.time()
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content  = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
-        extracted_text = ""
         with open(tmp_path, "rb") as pdf_file:
             reader = PdfReader(pdf_file)
             for page in reader.pages:
                 extracted_text += page.extract_text() or ""
 
         if not extracted_text.strip():
-            return JSONResponse(
-                {"error": "No text found in PDF"}, status_code=400
-            )
+            return JSONResponse({"error": "No text found in PDF"}, status_code=400)
 
         cleaned  = clean_text(extracted_text)
         analysis = extract_characters_with_gender(cleaned, extracted_text)
+        segments = analysis.get("segments", [])
 
-        # --------------------------------------------------
-        # pull the results list out of Colab's response
-        # --------------------------------------------------
-        speaker_data    = analysis.get("speaker_data", {})
-        speaker_results = speaker_data.get("results", [])
+        print("segments:", segments)
 
-        print("speaker_results:", speaker_results)
-
-        # --------------------------------------------------
-        # generate multi-voice audiobook via tts_test2
-        # --------------------------------------------------
-        audio_filename = f"E:/audiobook_output/pdf_audiobook_{int(time.time())}.wav"
-        tts_response   = call_tts_service(speaker_results, audio_filename)
-        audio_path     = tts_response.get("audiobook_file", "unavailable")
-
-        output_dir     = os.path.join(os.getcwd(), "output")
-        os.makedirs(output_dir, exist_ok=True)
+        audio_filename  = f"pdf_audiobook_{int(time.time())}.wav"
+        full_audio_path = f"E:/audiobook_output/{audio_filename}"
+        tts_response    = call_tts_service(segments, full_audio_path)
+        local_audio_path = tts_response.get("audiobook_file", "unavailable")
 
         gen_time = round(time.time() - start_time, 2)
+        duration = get_wav_duration_seconds(local_audio_path)
+
+        # --------------------------------------------------
+        # UPLOAD WAV TO SUPABASE STORAGE
+        # --------------------------------------------------
+        with open(local_audio_path, "rb") as f:
+            supabase.storage.from_("audiobooks").upload(
+                path=audio_filename,
+                file=f,
+                file_options={"content-type": "audio/wav"}
+            )
+
+        public_url = supabase.storage.from_("audiobooks").get_public_url(audio_filename)
+
+        # --------------------------------------------------
+        # INSERT INTO SUPABASE DB
+        # --------------------------------------------------
+        supabase.table("audiobook_generations").insert({
+            "title":                   title,
+            "input_text":              cleaned,
+            "input_method":            "file",
+            "file_name":               file.filename,
+            "audio_url":               public_url,
+            "duration":                duration,
+            "status":                  "completed",
+            "text_length":             len(cleaned),
+            "generation_time_seconds": gen_time,
+            "message":                 "PDF processed successfully 🎧",
+            "characters_detected":     analysis["characters"],
+            "gender_profiles":         analysis["profiles"],
+            "segments":                segments,
+            "speaker_attribution":     analysis.get("speaker_data", {}).get("results", []),
+        }).execute()
 
         return JSONResponse({
-            "title":               title,
-            "characters_detected": analysis["characters"],
-            "gender_profiles":     analysis["profiles"],
-            "speaker_attribution": speaker_results,
-            "audiobook_file":      audio_path,
+            "success":                 True,
+            "characters_detected":     analysis["characters"],
+            "text_length":             len(cleaned),
+            "audiobook_file":          public_url,
             "generation_time_seconds": gen_time,
-            "message": "PDF processed successfully"
+            "message":                 "PDF processed successfully 🎧"
         })
 
     except Exception as e:
         import traceback
         print(traceback.format_exc())
+
+        # save failed record
+        try:
+            supabase.table("audiobook_generations").insert({
+                "title":         title,
+                "input_text":    extracted_text or "",
+                "input_method":  "file",
+                "status":        "failed",
+                "error_message": str(e),
+                "text_length":   len(extracted_text) if extracted_text else 0,
+            }).execute()
+        except Exception as db_err:
+            print(f"Failed to log error to Supabase: {db_err}")
+
         return JSONResponse({"error": str(e)}, status_code=500)
 
     finally:
