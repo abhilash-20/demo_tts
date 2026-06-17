@@ -1,0 +1,101 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+
+# =========================
+# Virtual Environments
+# =========================
+venv/
+.env/
+.env.*
+.venv/
+ENV/
+env/
+.env
+gender_detection/venv_allennlp
+gender_detection/venv_llama
+tts_env/
+
+# =========================
+# FastAPI / Uvicorn
+# =========================
+*.log
+logs/
+uvicorn.log
+
+# =========================
+# Bytecode / Cache
+# =========================
+.cache/
+.pytest_cache/
+.mypy_cache/
+ruff_cache/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Secrets / Config
+# =========================
+secrets/
+config/local.yaml
+*.pem
+*.key
+
+# =========================
+# Database
+# =========================
+*.sqlite3
+*.db
+
+# =========================
+# Uploads / Media
+# =========================
+uploads/
+media/
+
+# =========================
+# Build / Distribution
+# =========================
+dist/
+build/
+*.egg-info/
+
+# =========================
+# Docker (optional)
+# =========================
+docker-compose.override.yml
+
+# =========================
+# NER model
+# =========================
+wikiann-distilbert-ner/
+gender_detection/models
+gender_detection/litbank_output
+
+# =========================
+# outputs audio files
+# =========================
+output/
+*.zip
+*.safetensors
+*.bin
+*.pt
+

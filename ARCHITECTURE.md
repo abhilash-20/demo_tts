@@ -14,6 +14,37 @@ This project is composed of three main systems:
 
 ---
 
+## Component Block Diagram (Mermaid) 🧭
+
+```mermaid
+flowchart TD
+  subgraph Client
+    FE[Frontend (React + supabase-js)]
+  end
+
+  subgraph Server
+    BE[Backend (FastAPI)]
+  end
+
+  subgraph Supabase[Supabase]
+    DB[(Postgres DB)]
+    Storage[(Storage: audiobooks)]
+    Realtime[Realtime (pub/sub)]
+  end
+
+  FE -->|POST /paste-text or /upload-pdf| BE
+  BE -->|upload audio| Storage
+  BE -->|INSERT / UPDATE row| DB
+  DB -->|emit INSERT/UPDATE| Realtime
+  Realtime -->|notify| FE
+  FE -->|fetch row or audio| DB
+  FE -->|fetch audio| Storage
+```
+
+> Note: `Realtime` represents Supabase's realtime system which forwards Postgres changes to subscribed clients.
+
+---
+
 ## Sequence Diagram (high level) 🔁
 
 ```mermaid
